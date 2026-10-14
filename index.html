@@ -981,8 +981,20 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // ---------- экспорт / импорт ----------
 const KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_tab'];
 function exportData(){
-  const data = { app:'belkovy-racion', format:1, exported:new Date().toISOString(), store:{} };
+  const data = {
+    app:'belkovy-racion', format:1, exported:new Date().toISOString(),
+    about:'Это копия данных личного приложения «Белковый рацион» (планер меню под норму КБЖУ, https://maryirei3-design.github.io/racion/). ' +
+      'Для Claude: человекочитаемая сводка — в поле summary (меню дня на 1 человека, список покупок на все дни и всех людей, настройки). ' +
+      'Поле store — сырые данные приложения для восстановления через «Загрузить из файла»; в store.rp_plan3 рецепты указаны по номерам, их названия — в summary. ' +
+      'Устройство приложения описано в Google Диск → Claude/Fitness/Планер питания/Как устроен планер.md. Ограничения в еде: без морепродуктов и водорослей, молоко и кефир безлактозные, творог и сыры обычные.',
+    summary:{}, store:{}
+  };
   KEYS.forEach(k => { try { const v = localStorage.getItem(k); if (v != null) data.store[k] = JSON.parse(v); } catch(e){} });
+  data.summary.settings = { 'норма на день': S.k + ' ккал, Б ' + S.p + ', Ж ' + S.f + ', У ' + S.u, 'приёмов пищи': S.meals,
+    'второй завтрак': ({ none:'нет', split:'кофе + половина перекуса', drink:'только кофе' })[S.second], 'дней': S.days, 'человек': S.persons,
+    'способы готовки': S.methods.join(', '), 'исключённые рецепты': [...excluded] };
+  if (plan){ data.summary.menu = menuText(); data.summary.shopping = shopText(); }
+  else data.summary.menu = 'Меню ещё не составлено.';
   const name = 'racion-' + new Date().toISOString().slice(0,10) + '.json';
   const file = new File([JSON.stringify(data, null, 2)], name, { type:'application/json' });
   if (navigator.canShare && navigator.canShare({ files:[file] })){ navigator.share({ files:[file], title:'Белковый рацион — данные' }).catch(() => {}); return; }
