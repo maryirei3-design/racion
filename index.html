@@ -112,6 +112,10 @@ details.settings[open] .sum-edit{display:none}
 .exrow .txt{flex:1;min-width:0}
 .exrow .exg{width:72px;flex:none}
 .exform{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.backup-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;background:var(--accent);color:var(--accent-ink);border-radius:var(--r);padding:14px 16px;margin-bottom:14px}
+.backup-banner .hint{color:var(--accent-ink);opacity:.9}
+.backup-banner .btn{background:var(--card);color:var(--accent-text)}
+.backup-banner .btn.ghost{background:transparent;color:var(--accent-ink);box-shadow:inset 0 0 0 1.5px var(--accent-ink)}
 .next{display:flex;flex-direction:column;gap:12px}
 .next p{margin:0}
 .shop-grid,.prep-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:start}
@@ -154,6 +158,10 @@ textarea.copybox{width:100%;min-height:160px;border:1.5px solid var(--line);bord
 </head>
 <body>
 <div class="wrap">
+  <div class="backup-banner" id="backup-banner" hidden>
+    <div class="txt"><b>Пора сохранить копию данных</b><div class="hint" id="backup-banner-txt"></div></div>
+    <div class="row"><button type="button" class="btn small" data-backup>Сохранить копию</button><button type="button" class="btn small ghost" id="backup-later">Позже</button></div>
+  </div>
   <section id="view-menu">
     <h1>Меню</h1>
     <details class="card settings" id="settings-box">
@@ -211,6 +219,7 @@ textarea.copybox{width:100%;min-height:160px;border:1.5px solid var(--line);bord
     <div class="card next" id="data-card">
       <div class="row" style="justify-content:space-between"><h2>Мои данные</h2></div>
       <p class="hint">Настройки, меню и отметки хранятся только на этом телефоне. Раз в пару недель сохраняй копию: она откроется через «Поделиться» — отправь её в «Файлы» или Telegram. Из копии всё можно восстановить или отдать Claude для разбора.</p>
+      <p class="hint" id="backup-status"></p>
       <div class="row"><button type="button" class="btn small" id="export">Сохранить копию</button>
       <label class="btn small ghost" for="import-file" style="display:inline-block">Загрузить из файла</label>
       <input type="file" id="import-file" accept=".json,application/json" hidden></div>
@@ -979,7 +988,33 @@ document.addEventListener('click', e => {
 $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').close(); });
 
 // ---------- экспорт / импорт ----------
-const KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_tab'];
+const KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_tab','rp_backup'];
+// ---------- напоминание о копии: раз в 7 дней ----------
+const BACKUP_DAYS = 7;
+let backupLater = false;
+function backupInfo(){
+  const b = store.get('rp_backup', null) || {};
+  if (!b.start){ b.start = new Date().toISOString(); store.set('rp_backup', b); }
+  const since = new Date(b.last || b.start);
+  const days = Math.floor((Date.now() - since.getTime()) / 86400000);
+  return { b, days };
+}
+const fmtDate = iso => { const d = new Date(iso); return String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0'); };
+function renderBackup(){
+  const { b, days } = backupInfo();
+  const due = days >= BACKUP_DAYS;
+  const ago = days === 0 ? 'сегодня' : days + ' ' + plural(days,'день','дня','дней') + ' назад';
+  $('backup-banner').hidden = !due || backupLater;
+  $('backup-banner-txt').textContent = b.last ? 'Последняя копия была ' + ago + ' (' + fmtDate(b.last) + '). Это займёт пару секунд.' :
+    'Копию ещё ни разу не сохраняли, а приложением пользуешься уже ' + days + ' ' + plural(days,'день','дня','дней') + '.';
+  const left = Math.max(0, BACKUP_DAYS - days);
+  $('backup-status').textContent = (b.last ? 'Последняя копия: ' + fmtDate(b.last) + ' (' + ago + ').' : 'Копий пока не было.') +
+    (due ? ' Пора сохранить новую.' : ' Напомню через ' + left + ' ' + plural(left,'день','дня','дней') + '.');
+}
+function markBackup(){
+  const { b } = backupInfo(); b.last = new Date().toISOString(); store.set('rp_backup', b);
+  backupLater = false; renderBackup(); toast('Копия сохранена');
+}
 function exportData(){
   const data = {
     app:'belkovy-racion', format:1, exported:new Date().toISOString(),
@@ -997,9 +1032,10 @@ function exportData(){
   else data.summary.menu = 'Меню ещё не составлено.';
   const name = 'racion-' + new Date().toISOString().slice(0,10) + '.json';
   const file = new File([JSON.stringify(data, null, 2)], name, { type:'application/json' });
-  if (navigator.canShare && navigator.canShare({ files:[file] })){ navigator.share({ files:[file], title:'Белковый рацион — данные' }).catch(() => {}); return; }
+  if (navigator.canShare && navigator.canShare({ files:[file] })){ navigator.share({ files:[file], title:'Белковый рацион — данные' }).then(markBackup).catch(() => {}); return; }
   const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name;
   document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  markBackup();
 }
 function importData(file){
   const fr = new FileReader();
@@ -1014,6 +1050,10 @@ function importData(file){
   fr.readAsText(file);
 }
 $('export').addEventListener('click', exportData);
+document.addEventListener('click', e => { if (e.target.closest('[data-backup]')) exportData(); });
+$('backup-later').addEventListener('click', () => { backupLater = true; renderBackup(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) renderBackup(); });
+renderBackup();
 $('import-file').addEventListener('change', e => { const f = e.target.files[0]; if (f) importData(f); e.target.value = ''; });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
