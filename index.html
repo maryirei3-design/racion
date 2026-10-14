@@ -199,13 +199,6 @@ textarea.copybox{width:100%;min-height:160px;border:1.5px solid var(--line);bord
             <span class="hint" id="sub-hint"></span>
             <label class="toggle"><input type="checkbox" id="s-base"> Добавлять простые гарниры и салаты: гречка, рис, картофель, овощной салат, морковь по-корейски</label>
           </div>
-          <div class="field">
-            <span class="label">Мои данные</span>
-            <span class="hint">Настройки, меню и отметки хранятся только на этом телефоне. Раз в пару недель сохраняй копию — её можно отправить в «Файлы» или Telegram, а потом загрузить обратно или отдать Claude для разбора.</span>
-            <div class="row"><button type="button" class="btn small ghost" id="export">Сохранить копию</button>
-            <label class="btn small ghost" for="import-file" style="display:inline-block">Загрузить из файла</label>
-            <input type="file" id="import-file" accept=".json,application/json" hidden></div>
-          </div>
         </div>
         <div class="actions">
           <button class="btn" type="submit" id="go">Составить меню</button>
@@ -215,6 +208,13 @@ textarea.copybox{width:100%;min-height:160px;border:1.5px solid var(--line);bord
     </details>
     <div id="warn"></div>
     <div id="menu-out"></div>
+    <div class="card next" id="data-card">
+      <div class="row" style="justify-content:space-between"><h2>Мои данные</h2></div>
+      <p class="hint">Настройки, меню и отметки хранятся только на этом телефоне. Раз в пару недель сохраняй копию: она откроется через «Поделиться» — отправь её в «Файлы» или Telegram. Из копии всё можно восстановить или отдать Claude для разбора.</p>
+      <div class="row"><button type="button" class="btn small" id="export">Сохранить копию</button>
+      <label class="btn small ghost" for="import-file" style="display:inline-block">Загрузить из файла</label>
+      <input type="file" id="import-file" accept=".json,application/json" hidden></div>
+    </div>
   </section>
 
   <section id="view-shop" hidden>
