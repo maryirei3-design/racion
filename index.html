@@ -510,7 +510,8 @@ function boundsFor(r, role){
   return [lo, hi];
 }
 // компоненты дня -> масштабы порций (покоординатный спуск по взвешенной ошибке)
-function solveDay(day){
+// p — номер человека: блюда общие, а размер порции у каждого свой (с учётом его добавок)
+function solveDay(day, p = 0){
   const slots = SLOTS[day.meals.length];
   const T = [TG.k, TG.p, TG.f, TG.u];
   const W = [4, 3, 1.5, 1.5];
@@ -525,7 +526,7 @@ function solveDay(day){
     const [lo, hi] = boundsFor(r, it.role);
     comps.push({ it, a, lo, hi });
   }));
-  day.meals.forEach((m, mi) => extrasOf(m, 0).forEach(x => {
+  day.meals.forEach((m, mi) => extrasOf(m, p).forEach(x => {
     const n = exNut(x), a = new Array(rows).fill(0);
     a[0] = n.k / T[0]; a[1] = n.p / T[1]; a[2] = n.f / T[2]; a[3] = n.u / T[3];
     a[4 + mi] = n.k / (TG.k * slots[mi][3]);
@@ -533,7 +534,7 @@ function solveDay(day){
   }));
   if (TG.second && TG.second !== 'none'){
     const si = day.meals.findIndex(m => m.key === 's');
-    extrasOf(SECOND, 0).forEach(x => {
+    extrasOf(SECOND, p).forEach(x => {
       const n = exNut(x), a = new Array(rows).fill(0);
       a[0] = n.k / T[0]; a[1] = n.p / T[1]; a[2] = n.f / T[2]; a[3] = n.u / T[3];
       if (si >= 0) a[4 + si] = n.k / (TG.k * slots[si][3]);
@@ -555,7 +556,7 @@ function solveDay(day){
   // округляем порции до 5%, как бот делает «красивые» граммовки
   s = s.map((v, i) => clamp(Math.round(v * 20) / 20, comps[i].lo, comps[i].hi));
   tot.fill(0);
-  comps.forEach((c, i) => { if (c.it) c.it.s = s[i]; c.a.forEach((v, j) => tot[j] += s[i] * v); });
+  comps.forEach((c, i) => { if (c.it){ (c.it.sp ||= [])[p] = s[i]; if (p === 0) c.it.s = s[i]; } c.a.forEach((v, j) => tot[j] += s[i] * v); });
   let err = 0; for (let j = 0; j < rows; j++) err += w[j] * (tot[j] - 1) ** 2;
   day.err = err;
   return err;
@@ -605,6 +606,9 @@ function buildDay(P, used){
   return best;
 }
 
+function solveAll(day, n){ for (let p = n - 1; p >= 0; p--) solveDay(day, p); }
+const sc = (it, p) => (it.sp && it.sp[p] != null) ? it.sp[p] : it.s;
+const sumS = it => { let t = 0; for (let p = 0; p < plan.persons; p++) t += sc(it, p); return t; };
 function generate(){
   TG = { k:S.k, p:S.p, f:S.f, u:S.u, second:S.second };
   const { P, loose } = pools();
@@ -612,6 +616,7 @@ function generate(){
   if (plan && plan.blocks) plan.blocks[0].meals.forEach(m => m.items.forEach(it => used[it.id] = 2));
   const day = buildDay(P, used);
   if (!day){ plan = null; renderWarn('Не получилось составить меню: слишком мало блюд проходит под фильтры. Включи больше способов готовки или верни блюда в разделе «Рецепты».'); renderAll(); return; }
+  solveAll(day, S.persons);
   plan = { blocks:[day], days:S.days, persons:S.persons, start:S.start, meals:S.meals, target:{ k:S.k, p:S.p, f:S.f, u:S.u, second:S.second }, created:Date.now() };
   checked = new Set(); store.set('rp_checked', []);
   store.set('rp_plan3', plan);
@@ -635,6 +640,7 @@ function swapItem(bi, mi, ii){
   const top = scored.slice(0, Math.min(4, scored.length));
   const choice = pick(top);
   plan.blocks[bi] = choice.copy;
+  solveAll(plan.blocks[bi], plan.persons);
   store.set('rp_plan3', plan);
   renderAll();
 }
@@ -643,9 +649,9 @@ function rebuildBlock(){ generate(); }
 // ---------- вычисления для отображения ----------
 const r1 = x => Math.round(x * 10) / 10;
 const grams = x => x >= 100 ? Math.round(x / 5) * 5 : x >= 10 ? Math.round(x) : r1(x);
-function itemNut(it){ const r = byId(it.id); return { k: r.k * it.s, p: r.p * it.s, f: r.f * it.s, u: r.u * it.s, w: r.w * it.s }; }
+function itemNut(it, p = viewer()){ const r = byId(it.id), q = sc(it, p); return { k: r.k * q, p: r.p * q, f: r.f * q, u: r.u * q, w: r.w * q }; }
 function sumNut(list){ return list.reduce((a, n) => ({ k:a.k+n.k, p:a.p+n.p, f:a.f+n.f, u:a.u+n.u, w:a.w+n.w }), { k:0,p:0,f:0,u:0,w:0 }); }
-const mealNut = (m, p = viewer()) => sumNut(m.items.map(itemNut).concat(extrasOf(m, typeof p === 'number' ? p : viewer()).map(exNut)));
+const mealNut = (m, p = viewer()) => sumNut(m.items.map(it => itemNut(it, p)).concat(extrasOf(m, p).map(exNut)));
 const secondOn = () => plan && plan.target.second && plan.target.second !== 'none';
 const dayNut = (d, p = viewer()) => sumNut(d.meals.map(m => mealNut(m, p)).concat(secondOn() ? extrasOf(SECOND, p).map(exNut) : []));
 const scaleNut = (n, f) => ({ k:n.k*f, p:n.p*f, f:n.f*f, u:n.u*f, w:n.w*f });
@@ -664,7 +670,7 @@ function displayMeals(day){
   });
   return out;
 }
-const cardNut = (c, pp = viewer()) => sumNut(c.parts.map(p => scaleNut(itemNut(p.it), p.frac)).concat(extrasOf(c.m, pp).map(exNut)));
+const cardNut = (c, pp = viewer()) => sumNut(c.parts.map(p => scaleNut(itemNut(p.it, pp), p.frac)).concat(extrasOf(c.m, pp).map(exNut)));
 const WD = ['вс','пн','вт','ср','чт','пт','сб'];
 function dayDate(i){
   const d = new Date((plan.start || tomorrow()) + 'T12:00:00'); d.setDate(d.getDate() + i);
@@ -691,7 +697,7 @@ function renderMenu(){
     '<button type="button" class="circle" data-copy-menu title="Скопировать меню текстом" aria-label="Скопировать меню текстом">' + ICON_COPY + '</button></div>';
   const vsw = nPers() > 1 ? '<div class="row viewer"><span class="hint">КБЖУ для:</span><div class="seg">' +
     Array.from({ length: nPers() }, (_, i) => '<button type="button" data-viewer="' + i + '" aria-pressed="' + (viewer() === i) + '">' + esc(pname(i)) + '</button>').join('') +
-    '</div>' + (viewer() > 0 ? '<span class="hint">порции блюд одинаковые, подобраны под норму «' + esc(pname(0)) + '»</span>' : '') + '</div>' : '';
+    '</div>' + '<span class="hint">блюда общие, граммовки — для выбранного человека</span>' + '</div>' : '';
   const tiles = '<div class="tiles">' + [['k','Калории','ккал'],['p','Белки','г'],['f','Жиры','г'],['u','Углеводы','г']].map(([k, l, u]) => {
     const v = n[k], st = status(v, T[k]), diff = v - T[k];
     return '<div class="tile"><div class="top">Цель <span class="badge">' + T[k] + (k === 'k' ? ' ккал' : ' г') + '</span></div>' +
@@ -702,9 +708,9 @@ function renderMenu(){
   const meals = '<div class="meals">' + displayMeals(day).map(c => {
     const mn = cardNut(c);
     const items = c.parts.map(p => {
-      const r = byId(p.it.id), w = r.w * p.it.s * p.frac;
+      const r = byId(p.it.id), q = sc(p.it, viewer()), w = r.w * q * p.frac;
       const roleTxt = c.half ? 'половина порции' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] : '');
-      return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + p.it.s + '">' + esc(r.n) + '</button> <span class="w">' + Math.round(w) + ' г</span></span>' +
+      return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + q + '">' + esc(r.n) + '</button> <span class="w">' + Math.round(w) + ' г</span></span>' +
         '<button type="button" class="swap" title="Заменить блюдо" aria-label="Заменить: ' + esc(r.n) + '" data-swap="0,' + p.mi + ',' + p.ii + '">' + ICON_SWAP + '</button></div>';
     }).join('');
     const exs = extrasOf(c.m).map(x => { const w = whoOf(x), mine = w === 'all' || w === viewer();
@@ -720,7 +726,7 @@ function renderMenu(){
   }).join('') + '</div>';
   const cnt = new Set(day.meals.flatMap(m => m.items.map(i => i.id))).size;
   const por = plan.days * plan.persons;
-  let tvG = 0; day.meals.forEach(m => m.items.forEach(it => byId(it.id).i.forEach(([nm, g]) => { if (GROUP(nm) === 'tv' && g != null) tvG += g * it.s * por; })));
+  let tvG = 0; day.meals.forEach(m => m.items.forEach(it => byId(it.id).i.forEach(([nm, g]) => { if (GROUP(nm) === 'tv' && g != null) tvG += g * sumS(it) * plan.days; })));
   const tvLine = tvG ? '<p class="hint">Творога (или замены) на всё меню: ≈' + grams(tvG) + ' г.</p>' : '<p class="hint">В этом меню нет творога.</p>';
   const next = '<div class="card next"><div class="row" style="justify-content:space-between"><h2>Итог дня</h2><span class="hint">граммовки и КБЖУ выше — на одну порцию</span></div>' +
     '<p>' + Math.round(n.k) + ' ккал · Б ' + r1(n.p) + ' · Ж ' + r1(n.f) + ' · У ' + r1(n.u) + '. В меню ' + cnt + ' ' + plural(cnt,'блюдо','блюда','блюд') +
@@ -748,9 +754,9 @@ function shoppingList(){
   plan.blocks[0].meals.forEach(m => m.items.forEach(it => {
     byId(it.id).i.forEach(([name0, g, unit0]) => {
       if (g == null){ if (!/бумага для жарки/.test(name0)) taste.add(ingName(name0)); return; }
-      if (name0 === 'яичный белок'){ whites += g * it.s * mult; return; }
+      if (name0 === 'яичный белок'){ whites += g * sumS(it) * plan.days; return; }
       const o = subOf(name0);
-      let name = ingName(name0), unit = unit0 || 'г', gg = g * it.s * mult;
+      let name = ingName(name0), unit = unit0 || 'г', gg = g * sumS(it) * plan.days;
       if (o && o.buy){ name = o.buy.name; unit = o.buy.unit; gg *= o.buy.f; }
       const key = name + '|' + unit;
       agg.set(key, (agg.get(key) || 0) + gg);
@@ -799,9 +805,9 @@ function renderPrep(){
   const by = new Map();
   plan.blocks[0].meals.forEach((m, mi) => m.items.forEach(it => {
     if (!by.has(it.id)) by.set(it.id, []);
-    by.get(it.id).push({ meal: slots[mi][1], s: it.s });
+    by.get(it.id).push({ meal: slots[mi][1], it });
   }));
-  const list = [...by.entries()].map(([id, ps]) => ({ r: byId(id), ps, sum: ps.reduce((a, p) => a + p.s, 0) * mult }))
+  const list = [...by.entries()].map(([id, ps]) => ({ r: byId(id), ps, sum: ps.reduce((a, p) => a + sumS(p.it), 0) * plan.days }))
     .sort((a, b) => (b.r.tt - a.r.tt) || (b.sum - a.sum));
   const totalActive = list.reduce((a, x) => a + x.r.t, 0);
   $('prep-sub').textContent = list.length + ' ' + plural(list.length,'блюдо','блюда','блюд') + ' на ' + factorText() + ', активной готовки примерно ' + totalActive +
@@ -822,7 +828,7 @@ function renderPrep(){
     const ing = r.i.map(([n, g, u]) => '<li>' + esc(n === 'яичный белок' ? 'яичный белок (от ' + Math.max(1, Math.round(g * x.sum / 33)) + ' яиц, желтки не нужны)' : ingName(n)) + ' — ' + (g == null ? 'по вкусу' : grams(g * x.sum) + ' ' + (u || 'г')) + '</li>').join('');
     return '<div class="card prep-card"><h3>' + esc(r.n) + '</h3>' +
       '<div class="meta">' + esc(r.m) + ' · активно ' + r.t + ' мин, всего ' + r.tt + ' мин</div>' +
-      '<div class="portions">' + x.ps.map(p => '<span class="badge">' + p.meal + ': ' + mult + ' × ' + Math.round(r.w * p.s) + ' г' + (p.meal === 'перекус' && plan.target.second === 'split' ? ' (делить пополам со вторым завтраком)' : '') + '</span>').join('') +
+      '<div class="portions">' + x.ps.map(p => '<span class="badge">' + p.meal + ': ' + Array.from({ length: plan.persons }, (_, i) => (plan.persons > 1 ? pname(i) + ' ' : '') + plan.days + ' × ' + Math.round(r.w * sc(p.it, i)) + ' г').join(', ') + (p.meal === 'перекус' && plan.target.second === 'split' ? ' (делить пополам со вторым завтраком)' : '') + '</span>').join('') +
       '<span class="badge">всего ≈' + (Math.round(r.w * x.sum / 10) * 10) + ' г</span></div>' +
       (r.subNames.length ? '<div class="note">Замена: ' + esc(r.subNames.join('; ')) + '. КБЖУ пересчитано.</div>' : '') +
       (r.approx ? '<div class="note">В боте у этого рецепта нет граммовок, они рассчитаны по КБЖУ примерно.</div>' : '') +
@@ -891,18 +897,18 @@ function addExtra(slot, id, g){
   (S.extras ||= {})[slot] ||= [];
   S.extras[slot].push({ id, g, who: exWho });
   saveSettings();
-  if (plan){ TG = plan.target; solveDay(plan.blocks[0]); store.set('rp_plan3', plan); }
+  if (plan){ TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); }
   $('dlg').close(); renderAll(); toast('Добавлено, порции пересчитаны');
 }
 function cycleWho(slot, xi){
   const x = S.extras[slot][xi], order = ['all'].concat(Array.from({ length: nPers() }, (_, i) => i));
   x.who = order[(order.indexOf(whoOf(x)) + 1) % order.length]; saveSettings();
-  if (plan){ TG = plan.target; solveDay(plan.blocks[0]); store.set('rp_plan3', plan); }
+  if (plan){ TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); }
   renderAll();
 }
 function delExtra(slot, xi){
   S.extras[slot].splice(xi, 1); saveSettings();
-  if (plan){ TG = plan.target; solveDay(plan.blocks[0]); store.set('rp_plan3', plan); }
+  if (plan){ TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); }
   renderAll();
 }
 
@@ -913,7 +919,7 @@ function menuText(){
     const mn = cardNut(c);
     return c.title + '\n' + c.parts.map(p => {
       const r = byId(p.it.id);
-      return '  • ' + (c.half ? '½ ' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] + ': ' : '')) + lc(r.n) + ' (' + Math.round(r.w * p.it.s * p.frac) + ' г)';
+      return '  • ' + (c.half ? '½ ' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] + ': ' : '')) + lc(r.n) + ' (' + (nPers() > 1 ? Array.from({ length: nPers() }, (_, i) => pname(i) + ' ' + Math.round(r.w * sc(p.it, i) * p.frac) + ' г').join(', ') : Math.round(r.w * p.it.s * p.frac) + ' г') + ')';
     }).concat(extrasOf(c.m).map(x => '  • + ' + x.e.n + ' (' + x.g + ' ' + x.e.u + ')' + (whoOf(x) !== 'all' ? ' — для: ' + pname(whoOf(x)) : ''))).join('\n') + '\nкбжу: ' + Math.round(mn.k) + ' / ' + r1(mn.p) + ' / ' + r1(mn.f) + ' / ' + r1(mn.u);
   }).join('\n\n') + '\n\n' + Array.from({ length: nPers() }, (_, i) => { const t = dayNut(day, i);
     return 'итог дня' + (nPers() > 1 ? ' — ' + pname(i) : '') + ': 🔥' + Math.round(t.k) + ' ккал: Б ' + r1(t.p) + ' / Ж ' + r1(t.f) + ' / У ' + r1(t.u); }).join('\n');
@@ -983,11 +989,11 @@ segHandler('s-meals', v => S.meals = +v);
 segHandler('s-second', v => {
   S.second = v;
   if (v !== 'none' && !((S.extras || {})['второй завтрак'] || []).length) (S.extras ||= {})['второй завтрак'] = [{ id:'coffee', g:200 }, { id:'milk', g:100 }];
-  if (plan){ plan.target.second = v; TG = plan.target; solveDay(plan.blocks[0]); store.set('rp_plan3', plan); renderAll(); }
+  if (plan){ plan.target.second = v; TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); renderAll(); }
 });
 segHandler('s-time', v => S.time = +v);
-segHandler('s-persons', v => S.persons = +v);
-const subChanged = () => { applySubs(); if (plan){ solveDay(plan.blocks[0]); store.set('rp_plan3', plan); } renderAll(); };
+segHandler('s-persons', v => { S.persons = +v; if (plan){ plan.persons = S.persons; TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); renderAll(); } });
+const subChanged = () => { applySubs(); if (plan){ solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); } renderAll(); };
 segHandler('s-yog', v => { S.yog = v; subChanged(); });
 segHandler('s-methods', v => { const i = S.methods.indexOf(v); if (i >= 0){ if (S.methods.length > 1) S.methods.splice(i, 1); } else S.methods.push(v); });
 $('s-names').addEventListener('input', e => { const i = e.target.dataset.name; if (i == null) return; (S.names ||= [])[+i] = e.target.value; saveSettings(); renderMenu(); });
@@ -1102,7 +1108,7 @@ renderSettings();
 if (!store.get('rp_settings', null)) $('settings-box').open = true;
 const saved = store.get('rp_plan3', null);
 if (saved && saved.blocks && saved.persons && saved.blocks.every(d => d.meals.every(m => m.items.every(it => R[it.id])))) { plan = saved; if (plan.meals === 5) plan = null; }
-if (plan){ if (!('second' in plan.target)) plan.target.second = S.second; TG = plan.target; plan.blocks[0].meals.forEach((m, mi) => m.name ||= SLOTS[plan.meals][mi][1]); renderAll(); }
+if (plan){ if (!('second' in plan.target)) plan.target.second = S.second; TG = plan.target; solveAll(plan.blocks[0], plan.persons); plan.blocks[0].meals.forEach((m, mi) => m.name ||= SLOTS[plan.meals][mi][1]); renderAll(); }
 else generate();
 let startTab = 'menu'; try { startTab = localStorage.getItem('rp_tab') || 'menu'; } catch(e){}
 if (location.hash && ['menu','shop','prep','rec'].includes(location.hash.slice(1))) startTab = location.hash.slice(1);
