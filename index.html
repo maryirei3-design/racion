@@ -116,6 +116,11 @@ details.settings[open] .sum-edit{display:none}
 .backup-banner .hint{color:var(--accent-ink);opacity:.9}
 .backup-banner .btn{background:var(--card);color:var(--accent-text)}
 .backup-banner .btn.ghost{background:transparent;color:var(--accent-ink);box-shadow:inset 0 0 0 1.5px var(--accent-ink)}
+.viewer{gap:8px 10px}
+.who{border:1px solid var(--accent);background:transparent;color:var(--accent-text);border-radius:999px;padding:0 8px;font:500 12px var(--font);cursor:pointer;margin-left:2px;vertical-align:1px}
+.item.dim .txt{opacity:.45}
+.names{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px}
+.names label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
 .next{display:flex;flex-direction:column;gap:12px}
 .next p{margin:0}
 .shop-grid,.prep-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:start}
@@ -187,6 +192,7 @@ textarea.copybox{width:100%;min-height:160px;border:1.5px solid var(--line);bord
             <div class="seg" id="s-days"></div>
             <span class="label">На сколько человек</span>
             <div class="seg" id="s-persons"></div>
+            <div class="names" id="s-names"></div>
             <span class="label">Приёмов пищи</span>
             <div class="seg" id="s-meals"></div>
             <span class="label">Второй завтрак (кофе)</span>
@@ -451,7 +457,14 @@ const EXTRAS = [
 ];
 const SECOND = { name:'второй завтрак', items:[] };
 const exItem = id => EXTRAS.find(e => e.id === id) || (S.custom || []).find(e => e.id === id);
-const extrasOf = m => ((S.extras || {})[m.name] || []).map((x, xi) => ({ ...x, xi, e: exItem(x.id) })).filter(x => x.e);
+// добавка может относиться ко всем (who:'all') или к одному человеку (who: номер с 0)
+const nPers = () => plan ? plan.persons : S.persons;
+const whoOf = x => x.who == null ? 'all' : x.who;
+const pname = i => ((S.names || [])[i] || '').trim() || (i === 0 ? 'Я' : 'Персона ' + (i + 1));
+const whoLabel = w => w === 'all' ? (nPers() > 1 ? 'всем' : '') : pname(w);
+const viewer = () => Math.min(S.viewer || 0, nPers() - 1);
+const extrasOf = (m, p) => ((S.extras || {})[m.name] || []).map((x, xi) => ({ ...x, xi, e: exItem(x.id) }))
+  .filter(x => x.e && (whoOf(x) === 'all' || whoOf(x) < nPers()) && (p == null || whoOf(x) === 'all' || whoOf(x) === p));
 const exNut = x => { const f = x.g / 100, v = x.e.v; return { k:v[0]*f, p:v[1]*f, f:v[2]*f, u:v[3]*f, w:x.g }; };
 const ICON_X = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 const ICON_SWAP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h13l-3-3M20 15H7l3 3"/></svg>';
@@ -512,7 +525,7 @@ function solveDay(day){
     const [lo, hi] = boundsFor(r, it.role);
     comps.push({ it, a, lo, hi });
   }));
-  day.meals.forEach((m, mi) => extrasOf(m).forEach(x => {
+  day.meals.forEach((m, mi) => extrasOf(m, 0).forEach(x => {
     const n = exNut(x), a = new Array(rows).fill(0);
     a[0] = n.k / T[0]; a[1] = n.p / T[1]; a[2] = n.f / T[2]; a[3] = n.u / T[3];
     a[4 + mi] = n.k / (TG.k * slots[mi][3]);
@@ -520,7 +533,7 @@ function solveDay(day){
   }));
   if (TG.second && TG.second !== 'none'){
     const si = day.meals.findIndex(m => m.key === 's');
-    extrasOf(SECOND).forEach(x => {
+    extrasOf(SECOND, 0).forEach(x => {
       const n = exNut(x), a = new Array(rows).fill(0);
       a[0] = n.k / T[0]; a[1] = n.p / T[1]; a[2] = n.f / T[2]; a[3] = n.u / T[3];
       if (si >= 0) a[4 + si] = n.k / (TG.k * slots[si][3]);
@@ -632,9 +645,9 @@ const r1 = x => Math.round(x * 10) / 10;
 const grams = x => x >= 100 ? Math.round(x / 5) * 5 : x >= 10 ? Math.round(x) : r1(x);
 function itemNut(it){ const r = byId(it.id); return { k: r.k * it.s, p: r.p * it.s, f: r.f * it.s, u: r.u * it.s, w: r.w * it.s }; }
 function sumNut(list){ return list.reduce((a, n) => ({ k:a.k+n.k, p:a.p+n.p, f:a.f+n.f, u:a.u+n.u, w:a.w+n.w }), { k:0,p:0,f:0,u:0,w:0 }); }
-const mealNut = m => sumNut(m.items.map(itemNut).concat(extrasOf(m).map(exNut)));
+const mealNut = (m, p = viewer()) => sumNut(m.items.map(itemNut).concat(extrasOf(m, typeof p === 'number' ? p : viewer()).map(exNut)));
 const secondOn = () => plan && plan.target.second && plan.target.second !== 'none';
-const dayNut = d => sumNut(d.meals.map(mealNut).concat(secondOn() ? extrasOf(SECOND).map(exNut) : []));
+const dayNut = (d, p = viewer()) => sumNut(d.meals.map(m => mealNut(m, p)).concat(secondOn() ? extrasOf(SECOND, p).map(exNut) : []));
 const scaleNut = (n, f) => ({ k:n.k*f, p:n.p*f, f:n.f*f, u:n.u*f, w:n.w*f });
 // карточки для показа: второй завтрак — отдельная карточка; при «пополам» блюдо перекуса делится между ним и перекусом
 function displayMeals(day){
@@ -651,7 +664,7 @@ function displayMeals(day){
   });
   return out;
 }
-const cardNut = c => sumNut(c.parts.map(p => scaleNut(itemNut(p.it), p.frac)).concat(extrasOf(c.m).map(exNut)));
+const cardNut = (c, pp = viewer()) => sumNut(c.parts.map(p => scaleNut(itemNut(p.it), p.frac)).concat(extrasOf(c.m, pp).map(exNut)));
 const WD = ['вс','пн','вт','ср','чт','пт','сб'];
 function dayDate(i){
   const d = new Date((plan.start || tomorrow()) + 'T12:00:00'); d.setDate(d.getDate() + i);
@@ -676,6 +689,9 @@ function renderMenu(){
   const range = plan.days > 1 ? dayDate(0) + ' – ' + dayDate(plan.days - 1) : dayDate(0);
   const period = '<div class="period"><div><div class="t">Меню на ' + plan.days + ' ' + plural(plan.days,'день','дня','дней') + ' · ' + plan.persons + ' ' + plural(plan.persons,'персона','персоны','персон') + '</div><div class="s">' + range + ' · каждый день одинаковое меню</div></div>' +
     '<button type="button" class="circle" data-copy-menu title="Скопировать меню текстом" aria-label="Скопировать меню текстом">' + ICON_COPY + '</button></div>';
+  const vsw = nPers() > 1 ? '<div class="row viewer"><span class="hint">КБЖУ для:</span><div class="seg">' +
+    Array.from({ length: nPers() }, (_, i) => '<button type="button" data-viewer="' + i + '" aria-pressed="' + (viewer() === i) + '">' + esc(pname(i)) + '</button>').join('') +
+    '</div>' + (viewer() > 0 ? '<span class="hint">порции блюд одинаковые, подобраны под норму «' + esc(pname(0)) + '»</span>' : '') + '</div>' : '';
   const tiles = '<div class="tiles">' + [['k','Калории','ккал'],['p','Белки','г'],['f','Жиры','г'],['u','Углеводы','г']].map(([k, l, u]) => {
     const v = n[k], st = status(v, T[k]), diff = v - T[k];
     return '<div class="tile"><div class="top">Цель <span class="badge">' + T[k] + (k === 'k' ? ' ккал' : ' г') + '</span></div>' +
@@ -691,8 +707,10 @@ function renderMenu(){
       return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + p.it.s + '">' + esc(r.n) + '</button> <span class="w">' + Math.round(w) + ' г</span></span>' +
         '<button type="button" class="swap" title="Заменить блюдо" aria-label="Заменить: ' + esc(r.n) + '" data-swap="0,' + p.mi + ',' + p.ii + '">' + ICON_SWAP + '</button></div>';
     }).join('');
-    const exs = extrasOf(c.m).map(x => '<div class="item"><span class="txt"><span class="role">дополнительно</span>' + esc(x.e.n) + ' <span class="w">' + x.g + ' ' + x.e.u + '</span></span>' +
-      '<button type="button" class="swap" title="Убрать" aria-label="Убрать: ' + esc(x.e.n) + '" data-exdel="' + esc(c.m.name) + '|' + x.xi + '">' + ICON_X + '</button></div>').join('');
+    const exs = extrasOf(c.m).map(x => { const w = whoOf(x), mine = w === 'all' || w === viewer();
+      return '<div class="item' + (mine ? '' : ' dim') + '"><span class="txt"><span class="role">дополнительно</span>' + esc(x.e.n) + ' <span class="w">' + x.g + ' ' + x.e.u + '</span>' +
+      (nPers() > 1 ? ' <button type="button" class="who" data-exwho="' + esc(c.m.name) + '|' + x.xi + '" title="Для кого — нажми, чтобы сменить">' + esc(whoLabel(w)) + '</button>' : '') + '</span>' +
+      '<button type="button" class="swap" title="Убрать" aria-label="Убрать: ' + esc(x.e.n) + '" data-exdel="' + esc(c.m.name) + '|' + x.xi + '">' + ICON_X + '</button></div>'; }).join('');
     const cap = c.title.charAt(0).toUpperCase() + c.title.slice(1);
     const empty = !c.parts.length && !extrasOf(c.m).length ? '<p class="hint" style="margin:6px 0 0">Пока пусто — добавь кофе, молоко или что-то к нему.</p>' : '';
     return '<div class="meal"><div class="meal-head"><h3>' + cap + '</h3><span class="badge">' + Math.round(mn.k) + ' ккал</span></div>' +
@@ -709,7 +727,7 @@ function renderMenu(){
     ': готовишь их один раз, по ' + por + ' ' + plural(por,'порции','порции','порций') + ' каждого (' + factorText() + ').</p>' +
     '<div class="row"><button type="button" class="btn small" data-goto="prep">План заготовок</button><button type="button" class="btn small ghost" data-goto="shop">Список покупок</button><button type="button" class="btn small ghost" data-rebuild="0">Другое меню</button></div>' +
     tvLine + '<p class="hint">Готовые блюда обычно хранятся в холодильнике 3–4 дня. Если меню на дольше, часть порций лучше заморозить сразу.</p></div>';
-  out.innerHTML = '<section>' + period + tiles + meals + next + '</section>';
+  out.innerHTML = '<section>' + period + vsw + tiles + meals + next + '</section>';
 }
 function plural(n, a, b, c){ const m10 = n % 10, m100 = n % 100; return m10 === 1 && m100 !== 11 ? a : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? b : c; }
 
@@ -741,7 +759,7 @@ function shoppingList(){
   plan.blocks[0].meals.concat(secondOn() ? [SECOND] : []).forEach(m => extrasOf(m).forEach(x => {
     if (x.e.noShop) return;
     const key = x.e.n + '|' + x.e.u;
-    agg.set(key, (agg.get(key) || 0) + x.g * mult);
+    agg.set(key, (agg.get(key) || 0) + x.g * (whoOf(x) === 'all' ? mult : plan.days));
   }));
   if (whites && !agg.has('яйца|г')) agg.set('яйца|г', 0);
   const groups = {};
@@ -840,9 +858,16 @@ function openRecipe(id, s){
   const d = $('dlg'); if (d.showModal) d.showModal(); else d.setAttribute('open', '');
 }
 
+let exWho = 'all';
+function whoSeg(){
+  return '<div class="seg" id="ex-who">' + ['all'].concat(Array.from({ length: nPers() }, (_, i) => i)).map(w =>
+    '<button type="button" data-exw="' + w + '" aria-pressed="' + (String(exWho) === String(w)) + '">' + esc(w === 'all' ? 'Всем' : pname(w)) + '</button>').join('') + '</div>';
+}
 function openExtras(slot){
   const list = EXTRAS.concat(S.custom || []);
+  exWho = 'all';
   $('dlg-body').innerHTML = '<div class="dlg-head"><div><h2>Добавить к приёму</h2><div class="hint">' + esc(slot) + ' · сохранится и для следующих меню</div></div><button type="button" class="btn small ghost" data-close>Закрыть</button></div>' +
+    (nPers() > 1 ? '<div class="field"><span class="label">Для кого</span>' + whoSeg() + '</div>' : '') +
     '<div class="exlist">' + list.map(e => '<div class="exrow"><div class="txt"><div>' + esc(e.n) + '</div><div class="hint">' + e.v[0] + ' ккал · Б ' + e.v[1] + ' · Ж ' + e.v[2] + ' · У ' + e.v[3] + ' на 100 ' + e.u + '</div></div>' +
       '<input class="inp exg" type="number" inputmode="numeric" min="1" max="1000" value="' + e.d + '" aria-label="Сколько, ' + e.u + '" id="exg-' + e.id + '"><span class="hint">' + e.u + '</span>' +
       '<button type="button" class="btn small" data-exadd="' + e.id + '" data-slot="' + esc(slot) + '">+</button></div>').join('') + '</div>' +
@@ -864,10 +889,16 @@ function openExtras(slot){
 }
 function addExtra(slot, id, g){
   (S.extras ||= {})[slot] ||= [];
-  S.extras[slot].push({ id, g });
+  S.extras[slot].push({ id, g, who: exWho });
   saveSettings();
   if (plan){ TG = plan.target; solveDay(plan.blocks[0]); store.set('rp_plan3', plan); }
   $('dlg').close(); renderAll(); toast('Добавлено, порции пересчитаны');
+}
+function cycleWho(slot, xi){
+  const x = S.extras[slot][xi], order = ['all'].concat(Array.from({ length: nPers() }, (_, i) => i));
+  x.who = order[(order.indexOf(whoOf(x)) + 1) % order.length]; saveSettings();
+  if (plan){ TG = plan.target; solveDay(plan.blocks[0]); store.set('rp_plan3', plan); }
+  renderAll();
 }
 function delExtra(slot, xi){
   S.extras[slot].splice(xi, 1); saveSettings();
@@ -883,8 +914,9 @@ function menuText(){
     return c.title + '\n' + c.parts.map(p => {
       const r = byId(p.it.id);
       return '  • ' + (c.half ? '½ ' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] + ': ' : '')) + lc(r.n) + ' (' + Math.round(r.w * p.it.s * p.frac) + ' г)';
-    }).concat(extrasOf(c.m).map(x => '  • + ' + x.e.n + ' (' + x.g + ' ' + x.e.u + ')')).join('\n') + '\nкбжу: ' + Math.round(mn.k) + ' / ' + r1(mn.p) + ' / ' + r1(mn.f) + ' / ' + r1(mn.u);
-  }).join('\n\n') + '\n\nитог дня: 🔥' + Math.round(n.k) + ' ккал: Б ' + r1(n.p) + ' / Ж ' + r1(n.f) + ' / У ' + r1(n.u) + ' (на 1 человека)';
+    }).concat(extrasOf(c.m).map(x => '  • + ' + x.e.n + ' (' + x.g + ' ' + x.e.u + ')' + (whoOf(x) !== 'all' ? ' — для: ' + pname(whoOf(x)) : ''))).join('\n') + '\nкбжу: ' + Math.round(mn.k) + ' / ' + r1(mn.p) + ' / ' + r1(mn.f) + ' / ' + r1(mn.u);
+  }).join('\n\n') + '\n\n' + Array.from({ length: nPers() }, (_, i) => { const t = dayNut(day, i);
+    return 'итог дня' + (nPers() > 1 ? ' — ' + pname(i) : '') + ': 🔥' + Math.round(t.k) + ' ккал: Б ' + r1(t.p) + ' / Ж ' + r1(t.f) + ' / У ' + r1(t.u); }).join('\n');
 }
 function shopText(){
   const { groups, taste } = shoppingList();
@@ -915,6 +947,8 @@ function renderSettings(){
   seg('s-methods', METHODS, S.methods, v => v);
   seg('s-time', [0,15,30], S.time, v => v ? 'до ' + v + ' мин' : 'любое');
   seg('s-persons', [1,2,3,4], S.persons, v => v);
+  $('s-names').innerHTML = S.persons > 1 ? Array.from({ length: S.persons }, (_, i) => '<label>' + (i === 0 ? 'Ты' : 'Персона ' + (i + 1)) +
+    '<input class="inp" data-name="' + i + '" value="' + esc(pname(i)) + '" maxlength="16"></label>').join('') : '';
   seg('s-yog', Object.keys(SUBS.yog), S.yog, v => SUBS.yog[v].label);
   $('sub-hint').textContent = 'Безлактозного греческого йогурта в продаже нет — его можно заменить процеженным безлактозным кефиром. Творог в рецептах обычный.';
 
@@ -956,6 +990,7 @@ segHandler('s-persons', v => S.persons = +v);
 const subChanged = () => { applySubs(); if (plan){ solveDay(plan.blocks[0]); store.set('rp_plan3', plan); } renderAll(); };
 segHandler('s-yog', v => { S.yog = v; subChanged(); });
 segHandler('s-methods', v => { const i = S.methods.indexOf(v); if (i >= 0){ if (S.methods.length > 1) S.methods.splice(i, 1); } else S.methods.push(v); });
+$('s-names').addEventListener('input', e => { const i = e.target.dataset.name; if (i == null) return; (S.names ||= [])[+i] = e.target.value; saveSettings(); renderMenu(); });
 $('s-base').addEventListener('change', e => { S.base = e.target.checked; saveSettings(); });
 
 $('s-start').addEventListener('change', e => { S.start = e.target.value || tomorrow(); saveSettings(); if (plan){ plan.start = S.start; store.set('rp_plan3', plan); renderAll(); } });
@@ -979,6 +1014,9 @@ document.addEventListener('click', e => {
   const sw = e.target.closest('[data-swap]'); if (sw){ const [a, b, c] = sw.dataset.swap.split(',').map(Number); swapItem(a, b, c); return; }
   const rb = e.target.closest('[data-rebuild]'); if (rb){ rebuildBlock(); return; }
   const ax = e.target.closest('[data-addx]'); if (ax){ openExtras(ax.dataset.addx); return; }
+  const ew = e.target.closest('[data-exw]'); if (ew){ exWho = ew.dataset.exw === 'all' ? 'all' : +ew.dataset.exw; $('ex-who').outerHTML = whoSeg(); return; }
+  const ewho = e.target.closest('[data-exwho]'); if (ewho){ const [sl, xi] = ewho.dataset.exwho.split('|'); cycleWho(sl, +xi); return; }
+  const vw = e.target.closest('[data-viewer]'); if (vw){ S.viewer = +vw.dataset.viewer; saveSettings(); renderMenu(); return; }
   const ea = e.target.closest('[data-exadd]'); if (ea){ addExtra(ea.dataset.slot, ea.dataset.exadd, Math.max(1, +$('exg-' + ea.dataset.exadd).value || 0)); return; }
   const ed = e.target.closest('[data-exdel]'); if (ed){ const [sl, xi] = ed.dataset.exdel.split('|'); delExtra(sl, +xi); return; }
   if (e.target.closest('[data-copy-menu]')){ if (plan) copy(menuText(), 'Меню'); return; }
@@ -1019,7 +1057,7 @@ function exportData(){
   const data = {
     app:'belkovy-racion', format:1, exported:new Date().toISOString(),
     about:'Это копия данных личного приложения «Белковый рацион» (планер меню под норму КБЖУ, https://maryirei3-design.github.io/racion/). ' +
-      'Для Claude: человекочитаемая сводка — в поле summary (меню дня на 1 человека, список покупок на все дни и всех людей, настройки). ' +
+      'Для Claude: человекочитаемая сводка — в поле summary (меню дня: порции на 1 человека, добавки помечены «для: имя», итог дня по каждому; список покупок на все дни и всех людей, настройки). ' +
       'Поле store — сырые данные приложения для восстановления через «Загрузить из файла»; в store.rp_plan3 рецепты указаны по номерам, их названия — в summary. ' +
       'Устройство приложения описано в Google Диск → Claude/Fitness/Планер питания/Как устроен планер.md. Ограничения в еде: без морепродуктов и водорослей, молоко и кефир безлактозные, творог и сыры обычные.',
     summary:{}, store:{}
