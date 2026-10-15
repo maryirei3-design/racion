@@ -224,11 +224,12 @@ textarea.copybox{width:100%;min-height:160px;border:1.5px solid var(--line);bord
     <div id="menu-out"></div>
     <div class="card next" id="data-card">
       <div class="row" style="justify-content:space-between"><h2>Мои данные</h2></div>
-      <p class="hint">Настройки, меню и отметки хранятся только на этом телефоне. Раз в пару недель сохраняй копию: она откроется через «Поделиться» — отправь её в «Файлы» или Telegram. Из копии всё можно восстановить или отдать Claude для разбора.</p>
+      <div id="sync-box" class="next"></div>
       <p class="hint" id="backup-status"></p>
       <div class="row"><button type="button" class="btn small" id="export">Сохранить копию</button>
       <label class="btn small ghost" for="import-file" style="display:inline-block">Загрузить из файла</label>
       <input type="file" id="import-file" accept=".json,application/json" hidden></div>
+      <p class="hint" id="app-version"></p>
     </div>
   </section>
 
@@ -487,7 +488,7 @@ const PRESETS = { def:{k:1650,p:125,f:60,u:148}, maint:{k:1825,p:122,f:58,u:204}
 // ---------- хранилище (только удобство, без него тоже работает) ----------
 const store = {
   get(k, d){ try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } },
-  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
+  set(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} if (window.__onStore) window.__onStore(k); }
 };
 const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0,10); };
 let S = Object.assign({ k:1650, p:125, f:60, u:148, days:3, meals:4, methods:[...METHODS], time:0, persons:1, base:true, lessTv:false, tv:'reg', second:'split', extras:{}, custom:[], yog:'reg', start:tomorrow() }, store.get('rp_settings', {}));
@@ -1031,6 +1032,113 @@ document.addEventListener('click', e => {
 });
 $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').close(); });
 
+// ---------- база: закрытый репозиторий racion-data, файл data.json ----------
+// Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
+// При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
+// Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
+const APP_VERSION = '7 · 15.10';
+const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
+const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3'];
+const sync = store.get('rp_sync', null) || {};
+const saveSync = () => { try { localStorage.setItem('rp_sync', JSON.stringify(sync)); } catch(e){} };
+let syncT = null, syncBusy = false;
+window.__onStore = k => {
+  if (!sync.token || !SYNC_KEYS.includes(k)) return;
+  sync.pending = true; saveSync(); clearTimeout(syncT); syncT = setTimeout(pushNow, 1500); renderSync();
+};
+const b64e = str => { const bytes = new TextEncoder().encode(str); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); };
+const b64d = b64 => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0)));
+async function ghFile(method, body){
+  const r = await fetch('https://api.github.com/repos/' + REPO + '/contents/' + FILE, { method, cache:'no-store',
+    headers:{ Authorization:'Bearer ' + sync.token, Accept:'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28', ...(body ? { 'Content-Type':'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined });
+  if (method === 'GET' && r.status === 404) return { sha:null, data:null };
+  if (!r.ok){ const e = new Error('http ' + r.status); e.status = r.status; throw e; }
+  const j = await r.json();
+  return method === 'GET' ? { sha:j.sha, data:JSON.parse(b64d(j.content)) } : { sha:j.content.sha };
+}
+const errKind = e => (e.status === 401 || e.status === 403 || e.status === 404) ? 'key' : 'net';
+function adoptStore(st){ KEYS.forEach(k => { if (k !== 'rp_tab' && st[k] !== undefined) localStorage.setItem(k, JSON.stringify(st[k])); }); }
+async function pushNow(){
+  clearTimeout(syncT);
+  if (!sync.token || syncBusy) return;
+  if (!navigator.onLine){ renderSync(); return; }
+  syncBusy = true;
+  try {
+    const remote = await ghFile('GET');
+    const body = { message:'Рацион · ' + new Date().toLocaleString('ru-RU'), content:b64e(JSON.stringify(buildData(), null, 1)) };
+    if (remote.sha) body.sha = remote.sha;
+    const res = await ghFile('PUT', body);
+    Object.assign(sync, { sha:res.sha, pending:false, last:new Date().toISOString(), error:'' }); saveSync();
+  } catch(e){ sync.error = errKind(e); saveSync(); }
+  finally { syncBusy = false; renderSync(); renderBackup(); }
+}
+async function pullNow(){
+  if (!sync.token || syncBusy || !navigator.onLine) return;
+  if (sync.pending) return pushNow();
+  syncBusy = true; let push = false, reload = false;
+  try {
+    const remote = await ghFile('GET');
+    if (!remote.sha) push = true;
+    else if (remote.sha !== sync.sha && remote.data && remote.data.store){
+      adoptStore(remote.data.store); Object.assign(sync, { sha:remote.sha, last:new Date().toISOString(), error:'' }); saveSync(); reload = true;
+    } else if (sync.error){ sync.error = ''; saveSync(); }
+  } catch(e){ sync.error = errKind(e); saveSync(); }
+  finally { syncBusy = false; renderSync(); }
+  if (reload){ try { sessionStorage.setItem('rp_pulled', '1'); } catch(e){} location.reload(); return; }
+  if (push){ sync.pending = true; saveSync(); pushNow(); }
+}
+// первое подключение: если телефон «чистый» (новый телефон) — берём данные из базы, иначе главный телефон
+async function connectSync(token){
+  const fresh = !localStorage.getItem('rp_settings');
+  sync.token = token.trim(); sync.sha = null; sync.error = ''; saveSync();
+  syncBusy = true;
+  try {
+    const remote = await ghFile('GET');
+    syncBusy = false;
+    if (fresh && remote.data && remote.data.store){
+      adoptStore(remote.data.store); Object.assign(sync, { sha:remote.sha, last:new Date().toISOString() }); saveSync();
+      toast('База подключена, данные загружены'); setTimeout(() => location.reload(), 700); return;
+    }
+    sync.pending = true; saveSync(); await pushNow();
+    toast(sync.error ? (sync.error === 'key' ? 'Ключ не подошёл' : 'Нет связи с GitHub, попробуй ещё раз') : 'База подключена — дальше всё сохраняется само');
+  } catch(e){ syncBusy = false; sync.error = errKind(e); saveSync(); toast(sync.error === 'key' ? 'Ключ не подошёл' : 'Нет связи с GitHub, попробуй ещё раз'); }
+  renderSync(); renderBackup();
+}
+function syncStatus(){
+  if (sync.error === 'key') return '<span class="st-bad">Ключ не подходит или истёк — подключи заново.</span>';
+  if (sync.pending) return navigator.onLine ? 'Сохраняю в базу…' : 'Нет интернета — сохранится, когда появится сеть.';
+  if (sync.error === 'net') return 'Не удалось связаться с GitHub, повторю при следующем открытии.';
+  return sync.last ? '✓ Всё сохранено в базу · ' + new Date(sync.last).toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : 'Подключено';
+}
+function renderSync(){
+  const box = $('sync-box'); if (!box) return;
+  const on = sync.token && sync.error !== 'key';
+  box.innerHTML = on
+    ? '<p class="hint">Всё сохраняется само: после каждого изменения данные уходят в закрытую базу на GitHub. Нажимать ничего не нужно.</p><p>' + syncStatus() + '</p>' +
+      '<div class="row"><button type="button" class="btn small" data-sync-now>Сохранить в базу сейчас</button><button type="button" class="btn small ghost" data-sync-off>Отключить базу</button></div>'
+    : '<p class="hint">' + (sync.error === 'key' ? syncStatus() : 'База не подключена — меню и настройки хранятся только в этом телефоне.') + '</p>' +
+      '<div class="row"><button type="button" class="btn small" data-sync-paste>' + (sync.error === 'key' ? 'Подключить заново' : 'Подключить базу') + '</button>' +
+      '<details class="more"><summary>вручную</summary><div class="row" style="margin-top:6px"><input class="inp" type="password" id="sync-token" placeholder="github_pat_…" autocomplete="off" style="flex:1;min-width:160px"><button type="button" class="btn small ghost" data-sync-connect>OK</button></div></details></div>';
+  $('app-version').textContent = 'Версия приложения ' + APP_VERSION;
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-sync-paste],[data-sync-connect],[data-sync-now],[data-sync-off]'); if (!b) return;
+  if (b.hasAttribute('data-sync-paste')){
+    let t = ''; try { t = (await navigator.clipboard.readText()).trim(); } catch(_){}
+    if (!/^(github_pat_|ghp_)/.test(t)){ toast(t ? 'В буфере нет ключа — скопируй его на GitHub' : 'Не получилось прочитать буфер — нажми «вручную»'); return; }
+    b.disabled = true; await connectSync(t); return;
+  }
+  if (b.hasAttribute('data-sync-connect')){
+    const t = $('sync-token').value.trim();
+    if (!/^(github_pat_|ghp_)/.test(t)){ toast('Ключ начинается с github_pat_'); return; }
+    b.disabled = true; await connectSync(t); return;
+  }
+  if (b.hasAttribute('data-sync-now')){ sync.pending = true; saveSync(); await pushNow(); toast(sync.error ? 'Не отправилось' : 'Сохранено в базу'); return; }
+  if (b.hasAttribute('data-sync-off')){ for (const k of Object.keys(sync)) delete sync[k]; saveSync(); renderSync(); renderBackup(); toast('База отключена, данные остались в телефоне'); }
+});
+window.addEventListener('online', () => { if (sync.pending) pushNow(); });
+
 // ---------- экспорт / импорт ----------
 const KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_tab','rp_backup'];
 // ---------- напоминание о копии: раз в 7 дней ----------
@@ -1048,10 +1156,12 @@ function renderBackup(){
   const { b, days } = backupInfo();
   const due = days >= BACKUP_DAYS;
   const ago = days === 0 ? 'сегодня' : days + ' ' + plural(days,'день','дня','дней') + ' назад';
-  $('backup-banner').hidden = !due || backupLater;
+  const synced = sync.token && sync.error !== 'key';
+  $('backup-banner').hidden = !due || backupLater || synced;
   $('backup-banner-txt').textContent = b.last ? 'Последняя копия была ' + ago + ' (' + fmtDate(b.last) + '). Это займёт пару секунд.' :
     'Копию ещё ни разу не сохраняли, а приложением пользуешься уже ' + days + ' ' + plural(days,'день','дня','дней') + '.';
   const left = Math.max(0, BACKUP_DAYS - days);
+  if (synced){ $('backup-status').textContent = 'Копию в файл делать не обязательно — всё уже в базе. Но можно, на всякий случай.'; return; }
   $('backup-status').textContent = (b.last ? 'Последняя копия: ' + fmtDate(b.last) + ' (' + ago + ').' : 'Копий пока не было.') +
     (due ? ' Пора сохранить новую.' : ' Напомню через ' + left + ' ' + plural(left,'день','дня','дней') + '.');
 }
@@ -1059,12 +1169,12 @@ function markBackup(){
   const { b } = backupInfo(); b.last = new Date().toISOString(); store.set('rp_backup', b);
   backupLater = false; renderBackup(); toast('Копия сохранена');
 }
-function exportData(){
+function buildData(){
   const data = {
     app:'belkovy-racion', format:1, exported:new Date().toISOString(),
     about:'Это копия данных личного приложения «Белковый рацион» (планер меню под норму КБЖУ, https://maryirei3-design.github.io/racion/). ' +
       'Для Claude: человекочитаемая сводка — в поле summary (меню дня: порции на 1 человека, добавки помечены «для: имя», итог дня по каждому; список покупок на все дни и всех людей, настройки). ' +
-      'Поле store — сырые данные приложения для восстановления через «Загрузить из файла»; в store.rp_plan3 рецепты указаны по номерам, их названия — в summary. ' +
+      'Поле store — сырые данные приложения (их же приложение само пишет в закрытый репозиторий maryirei3-design/racion-data, файл data.json); для восстановления — «Загрузить из файла»; в store.rp_plan3 рецепты указаны по номерам, их названия — в summary. ' +
       'Устройство приложения описано в Google Диск → Claude/Fitness/Планер питания/Как устроен планер.md. Ограничения в еде: без морепродуктов и водорослей, молоко и кефир безлактозные, творог и сыры обычные.',
     summary:{}, store:{}
   };
@@ -1074,6 +1184,10 @@ function exportData(){
     'способы готовки': S.methods.join(', '), 'исключённые рецепты': [...excluded] };
   if (plan){ data.summary.menu = menuText(); data.summary.shopping = shopText(); }
   else data.summary.menu = 'Меню ещё не составлено.';
+  return data;
+}
+function exportData(){
+  const data = buildData();
   const name = 'racion-' + new Date().toISOString().slice(0,10) + '.json';
   const file = new File([JSON.stringify(data, null, 2)], name, { type:'application/json' });
   if (navigator.canShare && navigator.canShare({ files:[file] })){ navigator.share({ files:[file], title:'Белковый рацион — данные' }).then(markBackup).catch(() => {}); return; }
@@ -1099,7 +1213,18 @@ $('backup-later').addEventListener('click', () => { backupLater = true; renderBa
 document.addEventListener('visibilitychange', () => { if (!document.hidden) renderBackup(); });
 renderBackup();
 $('import-file').addEventListener('change', e => { const f = e.target.files[0]; if (f) importData(f); e.target.value = ''; });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+if ('serviceWorker' in navigator){
+  const hadController = !!navigator.serviceWorker.controller; let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded){ reloaded = true; location.reload(); } });
+  navigator.serviceWorker.register('./sw.js', { updateViaCache:'none' }).then(reg => {
+    const check = () => reg.update().catch(() => {});
+    check(); document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+  }).catch(() => {});
+}
+renderSync();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pullNow(); });
+setTimeout(pullNow, 300);
+try { if (sessionStorage.getItem('rp_pulled')){ sessionStorage.removeItem('rp_pulled'); setTimeout(() => toast('Данные обновлены из базы'), 400); } } catch(e){}
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 
 // ---------- старт ----------
