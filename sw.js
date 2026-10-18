@@ -1,5 +1,5 @@
 // Офлайн-режим: страница всегда берётся из сети (в обход временной копии браузера), а без интернета — из кэша.
-const CACHE = 'racion-v8';
+const CACHE = 'racion-v9';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

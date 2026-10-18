@@ -229,6 +229,7 @@ textarea.copybox{width:100%;min-height:160px;border:1.5px solid var(--line);bord
       <div class="row"><button type="button" class="btn small" id="export">Сохранить копию</button>
       <label class="btn small ghost" for="import-file" style="display:inline-block">Загрузить из файла</label>
       <input type="file" id="import-file" accept=".json,application/json" hidden></div>
+      <p class="hint" id="prod-box"></p>
       <p class="hint" id="app-version"></p>
     </div>
   </section>
@@ -419,13 +420,30 @@ const SUBS = {
 };
 const subOf = n => { const g = GROUP(n); return g ? SUBS[g][S[g]] : null; };
 const ingName = n => { const o = subOf(n); return o ? o.name(n) : n; };
+// ---------- мои продукты (из Notion «Продукты и кбжу», Claude пишет их в базу: store.rp_products) ----------
+// { updated, items:[{ n:имя продукта в рецептах/добавках, label:что купила, v:[ккал,Б,Ж,У на 100], b:[что заложено в рецептах на 100] }] }
+let PROD = (() => { try { const v = JSON.parse(localStorage.getItem('rp_products')); return v && Array.isArray(v.items) ? v : null; } catch(e){ return null; } })();
+const prodOf = n => PROD ? PROD.items.find(x => x.n === n && x.v && x.b) : null;
+const prodStamp = st => (st && st.rp_products && st.rp_products.updated) || '';
+function applyProducts(){
+  EXTRAS.forEach(e => { if (e.v0 == null) e.v0 = e.v; const pr = prodOf(e.n); e.v = pr ? pr.v : e.v0; });
+  // «йогурт» из процеженного кефира: белок и жир ×2, углеводы ×1,25 от кефира
+  const K = SUBS.yog.kef, kf = prodOf(K.buy.name.split(' — ')[0]);
+  if (K.nut0 == null) K.nut0 = K.nut;
+  const t = x => Math.round(x * 10) / 10;
+  K.nut = kf ? (() => { const p = kf.v[1] * 2, f = kf.v[2] * 2, u = kf.v[3] * 1.25; return [Math.round(p * 4 + f * 9 + u * 4), t(p), t(f), t(u)]; })() : K.nut0;
+}
 function applySubs(){
+  applyProducts();
   R.forEach(r => {
     if (r.k0 == null){ r.k0 = r.k; r.p0 = r.p; r.f0 = r.f; r.u0 = r.u; }
     const d = [0,0,0,0];
     r.subNames = [];
     r.i.forEach(([n, g]) => {
-      const o = subOf(n); if (!o || g == null) return;
+      if (g == null) return;
+      const o = subOf(n), pr = prodOf(n);
+      if (pr && (!o || !o.nut)){ for (let j = 0; j < 4; j++) d[j] += g * (pr.v[j] - pr.b[j]) / 100; }
+      if (!o) return;
       if (S[GROUP(n)] !== 'reg') r.subNames.push(n + ' → ' + o.name(n));
       if (!o.nut) return;
       const b = BASE100[n];
@@ -799,6 +817,7 @@ function qtyText(it){
   }
   return grams(it.g) + ' ' + it.unit;
 }
+const prodHint = name => { const pr = prodOf(name) || prodOf(name.split(' — ')[0]); return pr && pr.label ? '<br><small class="hint">у тебя: ' + esc(pr.label) + '</small>' : ''; };
 function renderShop(){
   const el = $('shop');
   if (!plan){ el.innerHTML = ''; $('shop-sub').textContent = 'Сначала составь меню.'; return; }
@@ -806,7 +825,7 @@ function renderShop(){
   $('shop-sub').textContent = 'на ' + factorText() + (plan.days > 1 ? ', ' + dayDate(0) + ' – ' + dayDate(plan.days - 1) : ', ' + dayDate(0));
   const order = CATS.map(c => c[0]).filter(c => groups[c]);
   el.innerHTML = order.map(c => '<div class="card"><h3 style="margin-bottom:6px">' + c + '</h3>' + groups[c].map(it =>
-    '<label class="shop-item' + (checked.has(it.key) ? ' done' : '') + '"><input type="checkbox" data-key="' + esc(it.key) + '"' + (checked.has(it.key) ? ' checked' : '') + '><span class="nm">' + esc(it.name) + '</span><span class="qty">' + qtyText(it) + '</span></label>').join('') + '</div>').join('') +
+    '<label class="shop-item' + (checked.has(it.key) ? ' done' : '') + '"><input type="checkbox" data-key="' + esc(it.key) + '"' + (checked.has(it.key) ? ' checked' : '') + '><span class="nm">' + esc(it.name) + prodHint(it.name) + '</span><span class="qty">' + qtyText(it) + '</span></label>').join('') + '</div>').join('') +
     (taste.length ? '<div class="card"><h3 style="margin-bottom:6px">Проверить дома · по вкусу</h3><p class="hint" style="margin:0">' + taste.map(esc).join(', ') + '</p></div>' : '');
 }
 
@@ -1051,9 +1070,9 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '8 · 18.10';
+const APP_VERSION = '9 · 18.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
-const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3'];
+const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
 const saveSync = () => { try { localStorage.setItem('rp_sync', JSON.stringify(sync)); } catch(e){} };
 let syncT = null, syncBusy = false;
@@ -1095,7 +1114,7 @@ async function pullNow(){
   try {
     const remote = await ghFile('GET');
     if (!remote.sha) push = true;
-    else if (remote.sha !== sync.sha && remote.data && remote.data.store){
+    else if (remote.data && remote.data.store && (remote.sha !== sync.sha || (prodStamp(remote.data.store) && prodStamp(remote.data.store) !== (PROD ? PROD.updated : '')))){
       adoptStore(remote.data.store); Object.assign(sync, { sha:remote.sha, last:new Date().toISOString(), error:'' }); saveSync(); reload = true;
     } else if (sync.error){ sync.error = ''; saveSync(); }
   } catch(e){ sync.error = errKind(e); saveSync(); }
@@ -1155,6 +1174,10 @@ function renderSync(){
       '<div class="row"><button type="button" class="btn small" data-sync-paste>' + (sync.error === 'key' ? 'Подключить заново' : 'Подключить базу') + '</button>' +
       '<details class="more"><summary>вручную</summary><div class="row" style="margin-top:6px"><input class="inp" type="password" id="sync-token" placeholder="github_pat_…" autocomplete="off" style="flex:1;min-width:160px"><button type="button" class="btn small ghost" data-sync-connect>OK</button></div></details></div>';
   $('app-version').textContent = 'Версия приложения ' + APP_VERSION;
+  const pb = $('prod-box');
+  if (pb) pb.innerHTML = PROD && PROD.items.length
+    ? '<b>Мои продукты</b> · обновлено ' + esc(PROD.updated.split('-').reverse().join('.')) + '<br>' + PROD.items.map(x => esc(x.label || x.n) + ' — ' + x.v[0] + ' ккал, Б ' + x.v[1] + ' / Ж ' + x.v[2] + ' / У ' + x.v[3]).join('<br>') + '<br>КБЖУ меню считается по ним.'
+    : 'Мои продукты: пока нет. Добавь продукт в Notion («Продукты и кбжу») и попроси Claude пересчитать.';
 }
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-sync-paste],[data-sync-connect],[data-sync-now],[data-sync-off]'); if (!b) return;
@@ -1174,7 +1197,7 @@ document.addEventListener('click', async e => {
 window.addEventListener('online', () => { if (sync.pending) pushNow(); });
 
 // ---------- экспорт / импорт ----------
-const KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_tab','rp_backup'];
+const KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_tab','rp_backup','rp_products'];
 // ---------- напоминание о копии: раз в 7 дней ----------
 const BACKUP_DAYS = 7;
 let backupLater = false;
@@ -1272,7 +1295,10 @@ renderSettings();
 if (!store.get('rp_settings', null)) $('settings-box').open = true;
 const saved = store.get('rp_plan3', null);
 if (saved && saved.blocks && saved.persons && saved.blocks.every(d => d.meals.every(m => m.items.every(it => R[it.id])))) { plan = saved; if (plan.meals === 5) plan = null; }
-if (plan){ if (!('second' in plan.target)) plan.target.second = S.second; TG = plan.target; solveAll(plan.blocks[0], plan.persons); plan.blocks[0].meals.forEach((m, mi) => m.name ||= SLOTS[plan.meals][mi][1]); renderAll(); }
+if (plan){ if (!('second' in plan.target)) plan.target.second = S.second; TG = plan.target; solveAll(plan.blocks[0], plan.persons); plan.blocks[0].meals.forEach((m, mi) => m.name ||= SLOTS[plan.meals][mi][1]);
+  // продукты обновились — меню то же, порции пересчитаны; сохраняем, чтобы в базе была свежая сводка
+  if (PROD && plan.prod !== PROD.updated){ plan.prod = PROD.updated; store.set('rp_plan3', plan); setTimeout(() => toast('КБЖУ пересчитано по твоим продуктам — блюда те же'), 900); }
+  renderAll(); }
 else renderAll(); // меню без спроса не составляем — показываем, как вернуть или составить
 let startTab = 'menu'; try { startTab = localStorage.getItem('rp_tab') || 'menu'; } catch(e){}
 if (location.hash && ['menu','shop','prep','rec'].includes(location.hash.slice(1))) startTab = location.hash.slice(1);
