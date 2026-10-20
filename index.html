@@ -542,7 +542,8 @@ function solveDay(day, p = 0){
     const a = new Array(rows).fill(0);
     a[0] = r.k / T[0]; a[1] = r.p / T[1]; a[2] = r.f / T[2]; a[3] = r.u / T[3];
     a[4 + mi] = r.k / (TG.k * slots[mi][3]);
-    const [lo, hi] = boundsFor(r, it.role);
+    let [lo, hi] = boundsFor(r, it.role);
+    if (it.fix){ const q = sc(it, p); if (q != null) lo = hi = q; } // уже приготовлено — порцию не трогаем
     comps.push({ it, a, lo, hi });
   }));
   day.meals.forEach((m, mi) => extrasOf(m, p).forEach(x => {
@@ -742,8 +743,9 @@ function renderMenu(){
     const items = c.parts.map(p => {
       const r = byId(p.it.id), q = sc(p.it, viewer()), w = r.w * q * p.frac;
       const roleTxt = c.half ? 'половина порции' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] : '');
-      return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + q + '">' + esc(r.n) + '</button> <span class="w">' + Math.round(w) + ' г</span></span>' +
-        '<button type="button" class="swap" title="Заменить блюдо" aria-label="Заменить: ' + esc(r.n) + '" data-swap="0,' + p.mi + ',' + p.ii + '">' + ICON_SWAP + '</button></div>';
+      return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + q + '">' + esc(r.n) + '</button> <span class="w">' + Math.round(w) + ' г</span>' +
+        ' <button type="button" class="who" data-fix="' + p.mi + ',' + p.ii + '" title="Отметь, если уже приготовила или замесила — порция больше не будет меняться">' + (p.it.fix ? '✓ приготовлено' : 'приготовила?') + '</button></span>' +
+        (p.it.fix ? '' : '<button type="button" class="swap" title="Заменить блюдо" aria-label="Заменить: ' + esc(r.n) + '" data-swap="0,' + p.mi + ',' + p.ii + '">' + ICON_SWAP + '</button>') + '</div>';
     }).join('');
     const exs = extrasOf(c.m).map(x => { const w = whoOf(x), mine = w === 'all' || w === viewer();
       return '<div class="item' + (mine ? '' : ' dim') + '"><span class="txt"><span class="role">дополнительно</span>' + esc(x.e.n) + ' <span class="w">' + x.g + ' ' + x.e.u + '</span>' +
@@ -1050,6 +1052,8 @@ $('rec-body').addEventListener('change', e => {
 });
 document.addEventListener('click', e => {
   const o = e.target.closest('[data-open]'); if (o){ openRecipe(+o.dataset.open, +o.dataset.s); return; }
+  const fx = e.target.closest('[data-fix]'); if (fx){ const [a, b] = fx.dataset.fix.split(',').map(Number); const it = plan.blocks[0].meals[a].items[b];
+    it.fix = !it.fix; TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); renderAll(); toast(it.fix ? 'Порция этого блюда больше не меняется' : 'Порцию снова можно подгонять'); return; }
   const sw = e.target.closest('[data-swap]'); if (sw){ const [a, b, c] = sw.dataset.swap.split(',').map(Number); swapItem(a, b, c); return; }
   const rb = e.target.closest('[data-rebuild]'); if (rb){ rebuildBlock(rb); return; }
   if (e.target.closest('[data-gen]')){ generate(); toast('Меню готово'); return; }
@@ -1070,7 +1074,7 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '9 · 18.10';
+const APP_VERSION = '10 · 20.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
 const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
@@ -1093,17 +1097,24 @@ async function ghFile(method, body){
 }
 const errKind = e => (e.status === 401 || e.status === 403 || e.status === 404) ? 'key' : 'net';
 function adoptStore(st){ KEYS.forEach(k => { if (k !== 'rp_tab' && st[k] !== undefined) localStorage.setItem(k, JSON.stringify(st[k])); }); }
-async function pushNow(){
+async function pushNow(force){
   clearTimeout(syncT);
   if (!sync.token || syncBusy) return;
   if (!navigator.onLine){ renderSync(); return; }
   syncBusy = true;
   try {
     const remote = await ghFile('GET');
+    if (!force && remote.sha && sync.sha && remote.sha !== sync.sha && remote.data && remote.data.store){
+      // базу успели поменять с другой копии или Claude — не затираем вслепую
+      const rs = remote.data.store, rp = rs.rp_plan3;
+      if (rp && plan && rp.created !== plan.created){ syncBusy = false; chooseMenu(remote, rp); return; }
+      if (prodStamp(rs) && prodStamp(rs) !== (PROD ? PROD.updated : '')){ localStorage.setItem('rp_products', JSON.stringify(rs.rp_products)); sync.reloadAfter = true; }
+    }
     const body = { message:'Рацион · ' + new Date().toLocaleString('ru-RU'), content:b64e(JSON.stringify(buildData(), null, 1)) };
     if (remote.sha) body.sha = remote.sha;
     const res = await ghFile('PUT', body);
     Object.assign(sync, { sha:res.sha, pending:false, last:new Date().toISOString(), error:'' }); saveSync();
+    if (sync.reloadAfter){ delete sync.reloadAfter; saveSync(); location.reload(); }
   } catch(e){ sync.error = errKind(e); saveSync(); }
   finally { syncBusy = false; renderSync(); renderBackup(); }
 }
@@ -1155,7 +1166,7 @@ function chooseMenu(remote, rp){
     if (k.dataset.keep === 'base'){
       adoptStore(remote.data.store); Object.assign(sync, { sha:remote.sha, last:new Date().toISOString(), error:'' }); saveSync();
       try { sessionStorage.setItem('rp_pulled', '1'); } catch(_){} location.reload();
-    } else { sync.pending = true; saveSync(); await pushNow(); toast(sync.error ? 'Не отправилось' : 'База подключена, оставлено меню с телефона'); renderSync(); renderBackup(); }
+    } else { sync.pending = true; saveSync(); await pushNow(true); toast(sync.error ? 'Не отправилось' : 'База подключена, оставлено меню с телефона'); renderSync(); renderBackup(); }
   };
 }
 function syncStatus(){
