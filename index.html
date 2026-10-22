@@ -1032,20 +1032,22 @@ function whoSeg(){
     '<button type="button" data-exw="' + w + '" aria-pressed="' + (String(exWho) === String(w)) + '">' + esc(w === 'all' ? 'Всем' : pname(w)) + '</button>').join('') + '</div>';
 }
 function openExtras(slot){
-  const list = EXTRAS.concat(S.custom || []);
+  const hid = S.exHide || [], all = EXTRAS.concat(S.custom || []), list = all.filter(e => !hid.includes(e.id));
   exWho = 'all';
   $('dlg-body').innerHTML = '<div class="dlg-head"><div><h2>Добавить к приёму</h2><div class="hint">' + esc(slot) + ' · сохранится и для следующих меню</div></div><button type="button" class="btn small ghost" data-close>Закрыть</button></div>' +
     (nPers() > 1 ? '<div class="field"><span class="label">Для кого</span>' + whoSeg() + '</div>' : '') +
     '<div class="exlist">' + list.map(e => '<div class="exrow"><div class="txt"><div>' + esc(e.n) + '</div><div class="hint">' + e.v[0] + ' ккал · Б ' + e.v[1] + ' · Ж ' + e.v[2] + ' · У ' + e.v[3] + ' на 100 ' + e.u + '</div></div>' +
       '<input class="inp exg" type="number" inputmode="numeric" min="1" max="1000" value="' + e.d + '" aria-label="Сколько, ' + e.u + '" id="exg-' + e.id + '"><span class="hint">' + e.u + '</span>' +
-      '<button type="button" class="btn small" data-exadd="' + e.id + '" data-slot="' + esc(slot) + '">+</button></div>').join('') + '</div>' +
+      '<button type="button" class="btn small" data-exadd="' + e.id + '" data-slot="' + esc(slot) + '">+</button>' +
+      '<button type="button" class="swap" title="Убрать из списка" aria-label="Убрать из списка: ' + esc(e.n) + '" data-exhide="' + e.id + '" data-slot="' + esc(slot) + '">' + ICON_X + '</button></div>').join('') + '</div>' +
+    (all.length > list.length ? '<button type="button" class="addx" data-exunhide data-slot="' + esc(slot) + '">Вернуть скрытые продукты (' + (all.length - list.length) + ')</button>' : '') +
     '<details class="more"><summary>Свой продукт</summary><form id="exform" class="exform">' +
     '<input class="inp" id="cx-n" placeholder="Название, например «сырники из кофейни»" required>' +
     '<div class="macros-in"><label>Ккал<input id="cx-k" type="number" step="any" required></label><label>Б<input id="cx-p" type="number" step="any" required></label><label>Ж<input id="cx-f" type="number" step="any" required></label><label>У<input id="cx-u" type="number" step="any" required></label></div>' +
     '<span class="hint">КБЖУ на 100 г (или 100 мл) — с упаковки</span>' +
     '<div class="row"><input class="inp" id="cx-g" type="number" min="1" value="100" style="max-width:100px" required><select class="inp" id="cx-unit" style="max-width:80px"><option>г</option><option>мл</option></select>' +
     '<button class="btn small" type="submit">Добавить</button></div></form></details>';
-  $('dlg').showModal();
+  if (!$('dlg').open) $('dlg').showModal();
   $('exform').addEventListener('submit', e => {
     e.preventDefault();
     const it = { id:'c' + Date.now(), n:$('cx-n').value.trim(), u:$('cx-unit').value, d:+$('cx-g').value || 100,
@@ -1189,6 +1191,8 @@ document.addEventListener('click', e => {
   const ew = e.target.closest('[data-exw]'); if (ew){ exWho = ew.dataset.exw === 'all' ? 'all' : +ew.dataset.exw; $('ex-who').outerHTML = whoSeg(); return; }
   const ewho = e.target.closest('[data-exwho]'); if (ewho){ const [sl, xi] = ewho.dataset.exwho.split('|'); cycleWho(sl, +xi); return; }
   const vw = e.target.closest('[data-viewer]'); if (vw){ S.viewer = +vw.dataset.viewer; saveSettings(); renderMenu(); return; }
+  const eh = e.target.closest('[data-exhide]'); if (eh){ (S.exHide ||= []).push(eh.dataset.exhide); saveSettings(); openExtras(eh.dataset.slot); return; }
+  const eu = e.target.closest('[data-exunhide]'); if (eu){ S.exHide = []; saveSettings(); openExtras(eu.dataset.slot); return; }
   const ea = e.target.closest('[data-exadd]'); if (ea){ addExtra(ea.dataset.slot, ea.dataset.exadd, Math.max(1, +$('exg-' + ea.dataset.exadd).value || 0)); return; }
   const ed = e.target.closest('[data-exdel]'); if (ed){ const [sl, xi] = ed.dataset.exdel.split('|'); delExtra(sl, +xi); return; }
   if (e.target.closest('[data-copy-menu]')){ if (plan) copy(menuText(), 'Меню'); return; }
@@ -1201,7 +1205,7 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '12 · 22.10';
+const APP_VERSION = '13 · 22.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
 const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
