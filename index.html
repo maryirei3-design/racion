@@ -420,10 +420,53 @@ const SUBS = {
 };
 const subOf = n => { const g = GROUP(n); return g ? SUBS[g][S[g]] : null; };
 const ingName = n => { const o = subOf(n); return o ? o.name(n) : n; };
+// ---------- КБЖУ ингредиентов на 100 г (мл) — по ним считается КБЖУ рецептов (с v12, как в трекерах калорий) ----------
+// мои продукты из Notion (rp_products) подменяют эти значения; специи, соль и т.п. — 0
+const ING100 = {
+  'арахисовая паста без сахара':[588,25,50,12], 'бананы':[96,1.5,0.5,21], 'батат':[86,1.6,0.1,20], 'брокколи':[34,2.8,0.4,6.6],
+  'брюссельская капуста':[43,3.4,0.3,9], 'бумага для жарки':[0,0,0,0], 'ветчина из индейки':[110,18,4,1],
+  'говядина нежирная (вырезка)':[150,21,7,0], 'говядина постная (вырезка)':[150,21,7,0], 'говяжий фарш постный':[170,20,10,0],
+  'греческий йогурт 2%':[66,8,2,4], 'гречневая крупа (сухая)':[313,12.6,3.3,62], 'зелень':[40,2.5,0.4,6.3], 'зернёный творог':[107,12,5,3],
+  'зира, паприка, сушёный чеснок':[300,15,12,35], 'какао':[289,24.2,15,10.2], 'капуста или салат':[20,1.4,0.2,3.5],
+  'картофель':[77,2,0.4,16.3], 'картофель беби':[61,2,0.4,12.4], 'картофельное пюре (или картофель)':[82,2,0.4,17],
+  'кефир 1% безлактозный':[40,3,1,4], 'киноа (сухая)':[368,14,6,64], 'кокосовая стружка':[592,7,64,6], 'корица':[247,4,1.2,27.9],
+  'кофе без сахара':[2,0.2,0,0.3], 'кунжут':[565,19,49,12], 'кунжут / тыквенные семечки':[560,22,47,10],
+  'куриное филе':[113,23.6,1.9,0.4], 'куриные фрикадельки':[160,15,9,5], 'куриный фарш':[143,17.4,8.1,0],
+  'лепёшка роти':[300,8,8,50], 'лимон (сок и цедра)':[30,0.6,0.2,6], 'лимонный сок':[22,0.4,0.2,6.9], 'лук репчатый':[41,1.4,0.2,8.2],
+  'макароны (сухие)':[344,12,1.3,70], 'макароны «гнёзда» (сухие)':[344,12,1.3,70], 'макароны/спагетти (сухие)':[344,12,1.3,70],
+  'молоко 1,5% безлактозное':[45,3,1.5,4.8], 'морковь':[35,1.3,0.1,6.9], 'морковь по-корейски':[113,1.3,8,8.5],
+  'моцарелла мини':[240,18,17,1.5], 'мука пшеничная':[334,10.3,1.1,68.9], 'овощи и зелень для салата':[20,1,0.2,4],
+  'овсяные хлопья':[352,12.3,6.2,61.8], 'огурец':[15,0.8,0.1,2.8], 'оливковое масло':[898,0,99.8,0],
+  'паприка':[282,14,13,34], 'паприка, зира, куркума':[300,13,12,40], 'паприка, сушёный чеснок':[310,15,8,50],
+  'перец болгарский':[27,1.3,0.1,5.3], 'печенье савоярди':[390,8,4.5,79], 'подсластитель':[0,0,0,0], 'помидор':[20,1.1,0.2,3.7],
+  'помидоры черри':[18,0.9,0.2,3.5], 'протеин (изолят, без лактозы)':[370,85,1.5,3], 'протеиновый пудинг безлактозный':[80,10,1.5,6],
+  'псилиум':[200,2,1,10], 'разрыхлитель':[80,0,0,20], 'растительное масло':[899,0,99.9,0], 'рикотта':[150,11,10,3],
+  'рис (сухой)':[344,6.7,0.7,77], 'рисовая бумага':[330,6,0.5,75], 'рисовая мука':[366,6,1.4,80], 'сода':[0,0,0,0],
+  'соевый соус':[53,6,0,6.6], 'соль':[0,0,0,0], 'соус терияки':[89,6,0,16], 'специи':[0,0,0,0], 'стручковая фасоль':[24,2,0.2,3.6],
+  'сушёный чеснок':[345,17,0.8,73], 'сыр лёгкий':[264,30,16,0], 'сыр фета':[264,14,21,4], 'сыр чеддер':[402,25,33,1.3],
+  'творог 2%':[103,18,2,3.3], 'творог 5%':[121,17,5,3], 'творог мягкий 0,1%':[62,11,0.1,4.2], 'творожный сыр':[230,7,20,3],
+  'тефтели из индейки':[150,16,7,5], 'томатная паста':[82,4.3,0.5,15], 'томатный соус':[40,1.5,0.3,7], 'тыквенные семечки':[556,24.5,45.8,13.5],
+  'фасоль консервированная':[99,6.7,0.3,17.4], 'филе индейки':[112,23,2,0], 'филе индейки (фарш)':[112,23,2,0],
+  'хлебцы цельнозерновые':[330,10,2,58], 'цельнозерновая тортилья / тонкий лаваш':[270,9,4,48], 'цельнозерновой хлеб':[230,8.5,3,40],
+  'чеснок':[143,6.5,0.5,29.9], 'чёрный перец':[0,0,0,0], 'шампиньоны':[27,4.3,1,0.1], 'шоколад без сахара':[500,8,38,30],
+  'шпинат':[23,2.9,0.3,2], 'шпинат или руккола':[24,2.7,0.5,2.5], 'ягоды/фрукты':[45,0.8,0.4,10], 'яичный белок':[44,11.1,0,0],
+  'яйца':[157,12.7,11.5,0.7]
+};
+// КБЖУ продукта на 100: замена (кефирный «йогурт») → мой продукт → таблица; поиск и по названию с упаковки
+function ingV(n){
+  const o = subOf(n); if (o && o.nut) return o.nut;
+  const pr = prodOf(n); if (pr) return pr.v;
+  if (ING100[n]) return ING100[n];
+  const lc = String(n).trim().toLowerCase();
+  const lp = PROD && PROD.items.find(x => x.v && (x.label || '').toLowerCase() === lc); if (lp) return lp.v;
+  const ex = EXTRAS.concat(S.custom || []).find(e => e.n.toLowerCase() === lc); if (ex) return ex.v;
+  return null;
+}
+const knownNames = () => [...new Set(Object.keys(ING100).concat(PROD ? PROD.items.map(x => x.label).filter(Boolean) : [], EXTRAS.map(e => e.n), (S.custom || []).map(e => e.n)))].sort((a, b) => a.localeCompare(b, 'ru'));
 // ---------- мои продукты (из Notion «Продукты и кбжу», Claude пишет их в базу: store.rp_products) ----------
 // { updated, items:[{ n:имя продукта в рецептах/добавках, label:что купила, v:[ккал,Б,Ж,У на 100], b:[что заложено в рецептах на 100] }] }
 let PROD = (() => { try { const v = JSON.parse(localStorage.getItem('rp_products')); return v && Array.isArray(v.items) ? v : null; } catch(e){ return null; } })();
-const prodOf = n => PROD ? PROD.items.find(x => x.n === n && x.v && x.b) : null;
+const prodOf = n => PROD ? PROD.items.find(x => x.n === n && x.v) : null;
 const prodStamp = st => (st && st.rp_products && st.rp_products.updated) || '';
 function applyProducts(){
   EXTRAS.forEach(e => { if (e.v0 == null) e.v0 = e.v; const pr = prodOf(e.n); e.v = pr ? pr.v : e.v0; });
@@ -437,19 +480,18 @@ function applySubs(){
   applyProducts();
   R.forEach(r => {
     if (r.k0 == null){ r.k0 = r.k; r.p0 = r.p; r.f0 = r.f; r.u0 = r.u; }
-    const d = [0,0,0,0];
+    const t = [0,0,0,0]; let ok = true;
     r.subNames = [];
     r.i.forEach(([n, g]) => {
+      const o = subOf(n);
+      if (o && S[GROUP(n)] !== 'reg') r.subNames.push(n + ' → ' + o.name(n));
       if (g == null) return;
-      const o = subOf(n), pr = prodOf(n);
-      if (pr && (!o || !o.nut)){ for (let j = 0; j < 4; j++) d[j] += g * (pr.v[j] - pr.b[j]) / 100; }
-      if (!o) return;
-      if (S[GROUP(n)] !== 'reg') r.subNames.push(n + ' → ' + o.name(n));
-      if (!o.nut) return;
-      const b = BASE100[n];
-      for (let j = 0; j < 4; j++) d[j] += g * (o.nut[j] - b[j]) / 100;
+      const v = ingV(n); if (!v){ ok = false; return; }
+      for (let j = 0; j < 4; j++) t[j] += g * v[j] / 100;
     });
-    r.k = Math.round(r.k0 + d[0]); r.p = Math.round((r.p0 + d[1]) * 10) / 10; r.f = Math.round((r.f0 + d[2]) * 10) / 10; r.u = Math.round((r.u0 + d[3]) * 10) / 10;
+    // КБЖУ — сумма продуктов; если какого-то продукта нет в таблице — как в боте
+    if (!ok) t.splice(0, 4, r.k0, r.p0, r.f0, r.u0);
+    r.k = Math.round(t[0]); r.p = Math.round(t[1] * 10) / 10; r.f = Math.round(t[2] * 10) / 10; r.u = Math.round(t[3] * 10) / 10;
     r.role = r.c === 'main' ? ((r.u * 4 / r.k) >= 0.25 ? 'full' : 'prot') : r.c;
     r.hasTv = r.i.some(([n, g]) => GROUP(n) === 'tv' && g != null);
   });
@@ -540,6 +582,11 @@ function solveDay(day, p = 0){
   day.meals.forEach((m, mi) => m.items.forEach(it => {
     const r = byId(it.id);
     const a = new Array(rows).fill(0);
+    if (it.cook){ // готовое блюдо: КБЖУ порции посчитано по тому, что реально положили, — не трогаем
+      const n = cookCalc(it, it.cook)[p];
+      a[0] = n.k / T[0]; a[1] = n.p / T[1]; a[2] = n.f / T[2]; a[3] = n.u / T[3]; a[4 + mi] = n.k / (TG.k * slots[mi][3]);
+      comps.push({ it, a, lo:1, hi:1, ck:true }); return;
+    }
     a[0] = r.k / T[0]; a[1] = r.p / T[1]; a[2] = r.f / T[2]; a[3] = r.u / T[3];
     a[4 + mi] = r.k / (TG.k * slots[mi][3]);
     let [lo, hi] = boundsFor(r, it.role);
@@ -576,7 +623,7 @@ function solveDay(day, p = 0){
   // округляем порции до 5%, как бот делает «красивые» граммовки
   s = s.map((v, i) => clamp(Math.round(v * 20) / 20, comps[i].lo, comps[i].hi));
   tot.fill(0);
-  comps.forEach((c, i) => { if (c.it){ (c.it.sp ||= [])[p] = s[i]; if (p === 0) c.it.s = s[i]; } c.a.forEach((v, j) => tot[j] += s[i] * v); });
+  comps.forEach((c, i) => { if (c.it && !c.ck){ (c.it.sp ||= [])[p] = s[i]; if (p === 0) c.it.s = s[i]; } c.a.forEach((v, j) => tot[j] += s[i] * v); });
   let err = 0; for (let j = 0; j < rows; j++) err += w[j] * (tot[j] - 1) ** 2;
   day.err = err;
   return err;
@@ -633,14 +680,23 @@ const sumS = it => { let t = 0; for (let p = 0; p < plan.persons; p++) t += sc(i
 // по плану (что купили и приготовили) — base; фактически съеденное — sc()
 const planS = (it, p) => (it.cook && it.cook.base && it.cook.base[p] != null) ? it.cook.base[p] : sc(it, p);
 const sumPlan = it => { let t = 0; for (let p = 0; p < plan.persons; p++) t += planS(it, p); return t; };
-// c — данные готового блюда; возвращает для каждого человека { q:масштаб порции, w:вес готовой порции или null }
+// готовое блюдо целиком: c.ing — сколько реально положила каждого продукта (г на всё блюдо), c.add — что добавила сверх рецепта [{n, g, v?}]
+function batchNut(it, c){
+  const r = byId(it.id), mult = sumPlan(it) * plan.days;
+  const custom = c.ing && Object.keys(c.ing).length || (c.add || []).length;
+  if (!custom) return [r.k * mult, r.p * mult, r.f * mult, r.u * mult];
+  const t = [0,0,0,0];
+  r.i.forEach(([n, g]) => { const gg = c.ing && c.ing[n] != null ? c.ing[n] : (g == null ? 0 : g * mult), v = ingV(n); if (gg && v) for (let j = 0; j < 4; j++) t[j] += gg * v[j] / 100; });
+  (c.add || []).forEach(a => { const v = a.v || ingV(a.n); if (a.g && v) for (let j = 0; j < 4; j++) t[j] += a.g * v[j] / 100; });
+  return t;
+}
+// для каждого человека: КБЖУ порции и вес готовой порции (w — null, если вес не вписан)
 function cookCalc(it, c){
-  const r = byId(it.id), potRaw = r.w * sumPlan(it) * plan.days;
+  const r = byId(it.id), b = batchNut(it, c), tot = c.total > 0 ? c.total : null;
   return Array.from({ length: plan.persons }, (_, p) => {
-    const por = c.por && c.por[p] > 0 ? c.por[p] : null, tot = c.total > 0 ? c.total : null;
-    if (tot && por) return { q: por / tot * sumPlan(it) * plan.days, w: por };
-    if (tot) return { q: planS(it, p), w: r.w * planS(it, p) * tot / potRaw };
-    return { q: planS(it, p), w: por };
+    const por = c.por && c.por[p] > 0 ? c.por[p] : null;
+    const share = tot && por ? por / tot : planS(it, p) / (sumPlan(it) * plan.days);
+    return { k: b[0] * share, p: b[1] * share, f: b[2] * share, u: b[3] * share, w: por || (tot ? tot * share : null), wr: r.w * planS(it, p) };
   });
 }
 const cookedW = (it, p) => it.cook ? cookCalc(it, it.cook)[p].w : null;
@@ -690,7 +746,7 @@ function rebuildBlock(btn){
 // ---------- вычисления для отображения ----------
 const r1 = x => Math.round(x * 10) / 10;
 const grams = x => x >= 100 ? Math.round(x / 5) * 5 : x >= 10 ? Math.round(x) : r1(x);
-function itemNut(it, p = viewer()){ const r = byId(it.id), q = sc(it, p); return { k: r.k * q, p: r.p * q, f: r.f * q, u: r.u * q, w: r.w * q }; }
+function itemNut(it, p = viewer()){ if (it.cook){ const n = cookCalc(it, it.cook)[p]; return { k:n.k, p:n.p, f:n.f, u:n.u, w:n.w || n.wr }; } const r = byId(it.id), q = sc(it, p); return { k: r.k * q, p: r.p * q, f: r.f * q, u: r.u * q, w: r.w * q }; }
 function sumNut(list){ return list.reduce((a, n) => ({ k:a.k+n.k, p:a.p+n.p, f:a.f+n.f, u:a.u+n.u, w:a.w+n.w }), { k:0,p:0,f:0,u:0,w:0 }); }
 const mealNut = (m, p = viewer()) => sumNut(m.items.map(it => itemNut(it, p)).concat(extrasOf(m, p).map(exNut)));
 const secondOn = () => plan && plan.target.second && plan.target.second !== 'none';
@@ -901,26 +957,52 @@ function renderRec(){
 }
 
 function openCook(it){
-  const r = byId(it.id), n = plan.persons, pot = plan.days * n;
+  const r = byId(it.id), n = plan.persons, pot = plan.days * n, mult = sumPlan(it) * plan.days;
   const c0 = it.cook || {};
-  const nutTxt = (q, w) => { const k = r.k * q, pp = r.p * q, f = r.f * q, u = r.u * q;
-    return Math.round(k) + ' ккал · Б ' + r1(pp) + ' · Ж ' + r1(f) + ' · У ' + r1(u) + (w ? '<br><span class="hint">на 100 г готового: ' + Math.round(k / w * 100) + ' ккал · Б ' + r1(pp / w * 100) + ' · Ж ' + r1(f / w * 100) + ' · У ' + r1(u / w * 100) + '</span>' : ''); };
+  const def = (nm, g) => g == null ? '' : String(grams(g * mult));
+  const ingRows = r.i.map(([nm, g, u], k) => {
+    const v = c0.ing && c0.ing[nm] != null ? c0.ing[nm] : def(nm, g);
+    return '<div class="exrow"><div class="txt">' + esc(ingName(nm)) + (g == null ? '<div class="hint">по вкусу — впиши, если положила</div>' : '<div class="hint">по плану ' + def(nm, g) + ' ' + (u || 'г') + '</div>') + '</div>' +
+      '<input class="inp exg" type="number" inputmode="decimal" min="0" data-ing="' + k + '" value="' + v + '" placeholder="' + (g == null ? '—' : '0') + '"><span class="hint">' + (u || 'г') + '</span></div>';
+  }).join('');
+  const addRow = a => '<div class="card ck-add" style="background:var(--bg);padding:8px"><div class="row"><input class="inp" list="ck-names" data-an placeholder="Продукт, например «сыр Королевский»" value="' + esc(a.n || '') + '" style="flex:1;min-width:150px">' +
+    '<input class="inp" type="number" inputmode="decimal" min="0" data-ag placeholder="г" value="' + (a.g || '') + '" style="max-width:80px"></div>' +
+    '<div class="macros-in"><label>Ккал<input data-av="0" type="number" step="any" value="' + (a.v ? a.v[0] : '') + '"></label><label>Б<input data-av="1" type="number" step="any" value="' + (a.v ? a.v[1] : '') + '"></label><label>Ж<input data-av="2" type="number" step="any" value="' + (a.v ? a.v[2] : '') + '"></label><label>У<input data-av="3" type="number" step="any" value="' + (a.v ? a.v[3] : '') + '"></label></div>' +
+    '<span class="hint" data-ahint>КБЖУ на 100 г — если продукта нет в списке</span></div>';
+  const nutTxt = (x, w) => Math.round(x.k) + ' ккал · Б ' + r1(x.p) + ' · Ж ' + r1(x.f) + ' · У ' + r1(x.u) +
+    (w ? '<br><span class="hint">на 100 г готового: ' + Math.round(x.k / w * 100) + ' ккал · Б ' + r1(x.p / w * 100) + ' · Ж ' + r1(x.f / w * 100) + ' · У ' + r1(x.u / w * 100) + '</span>' : '');
   $('dlg-body').innerHTML = '<div class="dlg-head"><div><h2>Готовое блюдо</h2><div class="hint">' + esc(r.n) + '</div></div><button type="button" class="btn small ghost" data-close>Закрыть</button></div>' +
-    '<p class="hint" style="margin:0">При готовке уходит вода — блюдо весит меньше, а КБЖУ остаётся. Впиши вес — посчитаю КБЖУ готовой порции. Порция отмеченного блюда больше не подгоняется, остальное меню подстроится.</p>' +
-    '<label class="field"><span class="label">Всё блюдо после готовки, г <span class="hint">(вся форма/кастрюля — ' + pot + ' ' + plural(pot,'порция','порции','порций') + ')</span></span><input class="inp" type="number" inputmode="decimal" min="0" id="ck-total" value="' + (c0.total || '') + '" placeholder="необязательно"></label>' +
+    '<p class="hint" style="margin:0">Поправь, сколько реально положила, и впиши вес после готовки — КБЖУ порций посчитается как в трекере калорий. Порция отмеченного блюда больше не подгоняется, остальное меню подстроится.</p>' +
+    '<details class="more"' + (c0.ing || (c0.add || []).length ? ' open' : '') + '><summary>Что положила — на всё блюдо (' + pot + ' ' + plural(pot,'порция','порции','порций') + ')</summary>' +
+      '<div class="exlist">' + ingRows + '</div><div id="ck-adds">' + (c0.add || []).map(addRow).join('') + '</div>' +
+      '<button type="button" class="addx" id="ck-more">+ Добавить продукт (начинка, соус…)</button>' +
+      '<datalist id="ck-names">' + knownNames().map(x => '<option value="' + esc(x) + '">').join('') + '</datalist></details>' +
+    '<label class="field"><span class="label">Всё блюдо после готовки, г</span><input class="inp" type="number" inputmode="decimal" min="0" id="ck-total" value="' + (c0.total || '') + '" placeholder="взвесь без формы/кастрюли"></label>' +
     Array.from({ length: n }, (_, i) => '<div class="card" style="background:var(--bg)"><label class="field" style="margin:0"><span class="label">Порция ' + (n > 1 ? esc(pname(i)) : '') + ' на тарелке, г</span>' +
       '<input class="inp" type="number" inputmode="decimal" min="0" data-ck="' + i + '" value="' + ((c0.por || [])[i] || '') + '" placeholder="необязательно"></label>' +
-      '<p class="hint" style="margin:6px 0 0">по плану ' + Math.round(r.w * planS(it, i)) + ' г (вес по рецепту)</p><p style="margin:4px 0 0" id="ck-out-' + i + '"></p></div>').join('') +
+      '<p style="margin:6px 0 0" id="ck-out-' + i + '"></p></div>').join('') +
     '<div class="row"><button type="button" class="btn small" id="ck-save">Сохранить</button>' + (it.fix ? '<button type="button" class="btn small ghost" id="ck-reset">Снять отметку «готово»</button>' : '') + '</div>';
-  const read = () => ({ total: +$('ck-total').value || 0, por: Array.from({ length: n }, (_, i) => +document.querySelector('[data-ck="' + i + '"]').value || 0) });
-  const show = () => { const res = cookCalc(it, read()); res.forEach((x, i) => { $('ck-out-' + i).innerHTML = (x.w ? '<b>готовое ' + Math.round(x.w) + ' г</b> · ' : '') + nutTxt(x.q, x.w); }); };
-  $('dlg-body').oninput = show; show();
+  const read = () => {
+    const ing = {}; let changed = false;
+    r.i.forEach(([nm, g], k) => { const el = document.querySelector('[data-ing="' + k + '"]'), raw = el.value.trim();
+      if (raw !== def(nm, g)){ changed = true; ing[nm] = +raw || 0; } });
+    const add = [...document.querySelectorAll('.ck-add')].map(row => {
+      const nm = row.querySelector('[data-an]').value.trim(), g = +row.querySelector('[data-ag]').value || 0;
+      const vv = [...row.querySelectorAll('[data-av]')].map(x => x.value.trim());
+      const known = ingV(nm); row.querySelector('[data-ahint]').textContent = known && !vv.some(Boolean) ? 'из списка: ' + known[0] + ' ккал · Б ' + known[1] + ' · Ж ' + known[2] + ' · У ' + known[3] + ' на 100 г' : 'КБЖУ на 100 г — если продукта нет в списке';
+      return { n: nm, g, v: vv.some(Boolean) ? vv.map(x => +x || 0) : null };
+    }).filter(a => a.n && a.g);
+    return { ing: changed ? ing : null, add, total: +$('ck-total').value || 0, por: Array.from({ length: n }, (_, i) => +document.querySelector('[data-ck="' + i + '"]').value || 0) };
+  };
+  const show = () => { const res = cookCalc(it, read()); res.forEach((x, i) => { $('ck-out-' + i).innerHTML = (x.w ? '<b>готовое ' + Math.round(x.w) + ' г</b> · ' : '<b>' + Math.round(x.wr) + ' г по плану</b> · ') + nutTxt(x, x.w); }); };
+  $('dlg-body').oninput = show;
+  $('ck-more').onclick = () => { $('ck-adds').insertAdjacentHTML('beforeend', addRow({})); };
+  show();
   $('ck-save').onclick = () => {
     const c = read();
-    if (!it.cook) it.cook = { base: Array.from({ length: n }, (_, i) => sc(it, i)) };
-    it.cook.total = c.total || null; it.cook.por = c.por.map(x => x || null);
-    const res = cookCalc(it, it.cook);
-    it.sp = res.map(x => x.q); it.s = it.sp[0]; it.fix = true;
+    const base = it.cook && it.cook.base ? it.cook.base : Array.from({ length: n }, (_, i) => sc(it, i));
+    it.cook = { base, total: c.total || null, por: c.por.map(x => x || null), ing: c.ing, add: c.add };
+    it.sp = base.slice(); it.s = it.sp[0]; it.fix = true;
     TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); $('dlg').close(); renderAll(); toast('Сохранено — КБЖУ дня пересчитано');
   };
   if ($('ck-reset')) $('ck-reset').onclick = () => {
@@ -1119,7 +1201,7 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '11 · 22.10';
+const APP_VERSION = '12 · 22.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
 const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
