@@ -996,7 +996,7 @@ function openCook(it){
     const por = Array.from({ length: n }, (_, i) => +document.querySelector('[data-ck="' + i + '"]').value || 0);
     return { ing: changed ? ing : null, add, total: +$('ck-total').value || 0, por, ref: por.map((x, i) => x ? (refs[i] || x) : null) };
   };
-  const refs = (c0.ref || []).slice();
+  const refs = (c0.ref || c0.por || []).slice(); // полная порция = первый сохранённый вес
   const show = () => { const c = read(), res = cookCalc(it, c); res.forEach((x, i) => {
     $('ck-ref-' + i).innerHTML = c.total ? '' : c.ref[i] ? 'полная порция по плану — ' + c.ref[i] + ' г; впиши меньше или больше — КБЖУ изменится' + (c.por[i] !== c.ref[i] ? ' · <button type="button" class="linkish" data-ckref="' + i + '">это и есть полная порция</button>' : '') : ''; $('ck-out-' + i).innerHTML = (x.w ? '<b>готовое ' + Math.round(x.w) + ' г</b> · ' : '<b>' + Math.round(x.wr) + ' г по плану</b> · ') + nutTxt(x, x.w); }); };
   $('dlg-body').oninput = show;
@@ -1210,7 +1210,7 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '14 · 22.10';
+const APP_VERSION = '15 · 22.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
 const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
