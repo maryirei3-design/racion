@@ -629,6 +629,21 @@ function buildDay(P, used){
 function solveAll(day, n){ for (let p = n - 1; p >= 0; p--) solveDay(day, p); }
 const sc = (it, p) => (it.sp && it.sp[p] != null) ? it.sp[p] : it.s;
 const sumS = it => { let t = 0; for (let p = 0; p < plan.persons; p++) t += sc(it, p); return t; };
+// готовое блюдо: it.cook = { base:[порции по плану], total:вес всего блюда после готовки, por:[вес порции на тарелке у каждого] }
+// по плану (что купили и приготовили) — base; фактически съеденное — sc()
+const planS = (it, p) => (it.cook && it.cook.base && it.cook.base[p] != null) ? it.cook.base[p] : sc(it, p);
+const sumPlan = it => { let t = 0; for (let p = 0; p < plan.persons; p++) t += planS(it, p); return t; };
+// c — данные готового блюда; возвращает для каждого человека { q:масштаб порции, w:вес готовой порции или null }
+function cookCalc(it, c){
+  const r = byId(it.id), potRaw = r.w * sumPlan(it) * plan.days;
+  return Array.from({ length: plan.persons }, (_, p) => {
+    const por = c.por && c.por[p] > 0 ? c.por[p] : null, tot = c.total > 0 ? c.total : null;
+    if (tot && por) return { q: por / tot * sumPlan(it) * plan.days, w: por };
+    if (tot) return { q: planS(it, p), w: r.w * planS(it, p) * tot / potRaw };
+    return { q: planS(it, p), w: por };
+  });
+}
+const cookedW = (it, p) => it.cook ? cookCalc(it, it.cook)[p].w : null;
 function generate(){
   TG = { k:S.k, p:S.p, f:S.f, u:S.u, second:S.second };
   const { P, loose } = pools();
@@ -741,10 +756,10 @@ function renderMenu(){
   const meals = '<div class="meals">' + displayMeals(day).map(c => {
     const mn = cardNut(c);
     const items = c.parts.map(p => {
-      const r = byId(p.it.id), q = sc(p.it, viewer()), w = r.w * q * p.frac;
+      const r = byId(p.it.id), q = sc(p.it, viewer()), cw = cookedW(p.it, viewer()), w = (cw != null ? cw : r.w * q) * p.frac;
       const roleTxt = c.half ? 'половина порции' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] : '');
-      return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + q + '">' + esc(r.n) + '</button> <span class="w">' + Math.round(w) + ' г</span>' +
-        ' <button type="button" class="who" data-fix="' + p.mi + ',' + p.ii + '" title="Отметь, если уже приготовила или замесила — порция больше не будет меняться">' + (p.it.fix ? '✓ приготовлено' : 'приготовила?') + '</button></span>' +
+      return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + q + '">' + esc(r.n) + '</button> <span class="w">' + (cw != null ? 'готовое ' : '') + Math.round(w) + ' г</span>' +
+        ' <button type="button" class="who" data-fix="' + p.mi + ',' + p.ii + '" title="Готовое блюдо: отметить, вписать вес после готовки">' + (p.it.fix ? '✓ готово' + (p.it.cook && (p.it.cook.total || (p.it.cook.por || []).some(x => x)) ? ' · вес' : '') : 'приготовила?') + '</button></span>' +
         (p.it.fix ? '' : '<button type="button" class="swap" title="Заменить блюдо" aria-label="Заменить: ' + esc(r.n) + '" data-swap="0,' + p.mi + ',' + p.ii + '">' + ICON_SWAP + '</button>') + '</div>';
     }).join('');
     const exs = extrasOf(c.m).map(x => { const w = whoOf(x), mine = w === 'all' || w === viewer();
@@ -760,7 +775,7 @@ function renderMenu(){
   }).join('') + '</div>';
   const cnt = new Set(day.meals.flatMap(m => m.items.map(i => i.id))).size;
   const por = plan.days * plan.persons;
-  let tvG = 0; day.meals.forEach(m => m.items.forEach(it => byId(it.id).i.forEach(([nm, g]) => { if (GROUP(nm) === 'tv' && g != null) tvG += g * sumS(it) * plan.days; })));
+  let tvG = 0; day.meals.forEach(m => m.items.forEach(it => byId(it.id).i.forEach(([nm, g]) => { if (GROUP(nm) === 'tv' && g != null) tvG += g * sumPlan(it) * plan.days; })));
   const tvLine = tvG ? '<p class="hint">Творога (или замены) на всё меню: ≈' + grams(tvG) + ' г.</p>' : '<p class="hint">В этом меню нет творога.</p>';
   const next = '<div class="card next"><div class="row" style="justify-content:space-between"><h2>Итог дня</h2><span class="hint">граммовки и КБЖУ выше — на одну порцию</span></div>' +
     '<p>' + Math.round(n.k) + ' ккал · Б ' + r1(n.p) + ' · Ж ' + r1(n.f) + ' · У ' + r1(n.u) + '. В меню ' + cnt + ' ' + plural(cnt,'блюдо','блюда','блюд') +
@@ -788,9 +803,9 @@ function shoppingList(){
   plan.blocks[0].meals.forEach(m => m.items.forEach(it => {
     byId(it.id).i.forEach(([name0, g, unit0]) => {
       if (g == null){ if (!/бумага для жарки/.test(name0)) taste.add(ingName(name0)); return; }
-      if (name0 === 'яичный белок'){ whites += g * sumS(it) * plan.days; return; }
+      if (name0 === 'яичный белок'){ whites += g * sumPlan(it) * plan.days; return; }
       const o = subOf(name0);
-      let name = ingName(name0), unit = unit0 || 'г', gg = g * sumS(it) * plan.days;
+      let name = ingName(name0), unit = unit0 || 'г', gg = g * sumPlan(it) * plan.days;
       if (o && o.buy){ name = o.buy.name; unit = o.buy.unit; gg *= o.buy.f; }
       const key = name + '|' + unit;
       agg.set(key, (agg.get(key) || 0) + gg);
@@ -842,7 +857,7 @@ function renderPrep(){
     if (!by.has(it.id)) by.set(it.id, []);
     by.get(it.id).push({ meal: slots[mi][1], it });
   }));
-  const list = [...by.entries()].map(([id, ps]) => ({ r: byId(id), ps, sum: ps.reduce((a, p) => a + sumS(p.it), 0) * plan.days }))
+  const list = [...by.entries()].map(([id, ps]) => ({ r: byId(id), ps, sum: ps.reduce((a, p) => a + sumPlan(p.it), 0) * plan.days }))
     .sort((a, b) => (b.r.tt - a.r.tt) || (b.sum - a.sum));
   const totalActive = list.reduce((a, x) => a + x.r.t, 0);
   $('prep-sub').textContent = list.length + ' ' + plural(list.length,'блюдо','блюда','блюд') + ' на ' + factorText() + ', активной готовки примерно ' + totalActive +
@@ -863,7 +878,7 @@ function renderPrep(){
     const ing = r.i.map(([n, g, u]) => '<li>' + esc(n === 'яичный белок' ? 'яичный белок (от ' + Math.max(1, Math.round(g * x.sum / 33)) + ' яиц, желтки не нужны)' : ingName(n)) + ' — ' + (g == null ? 'по вкусу' : grams(g * x.sum) + ' ' + (u || 'г')) + '</li>').join('');
     return '<div class="card prep-card"><h3>' + esc(r.n) + '</h3>' +
       '<div class="meta">' + esc(r.m) + ' · активно ' + r.t + ' мин, всего ' + r.tt + ' мин</div>' +
-      '<div class="portions">' + x.ps.map(p => '<span class="badge">' + p.meal + ': ' + Array.from({ length: plan.persons }, (_, i) => (plan.persons > 1 ? pname(i) + ' ' : '') + plan.days + ' × ' + Math.round(r.w * sc(p.it, i)) + ' г').join(', ') + (p.meal === 'перекус' && plan.target.second === 'split' ? ' (делить пополам со вторым завтраком)' : '') + '</span>').join('') +
+      '<div class="portions">' + x.ps.map(p => '<span class="badge">' + p.meal + ': ' + Array.from({ length: plan.persons }, (_, i) => (plan.persons > 1 ? pname(i) + ' ' : '') + plan.days + ' × ' + Math.round(r.w * planS(p.it, i)) + ' г').join(', ') + (p.meal === 'перекус' && plan.target.second === 'split' ? ' (делить пополам со вторым завтраком)' : '') + '</span>').join('') +
       '<span class="badge">всего ≈' + (Math.round(r.w * x.sum / 10) * 10) + ' г</span></div>' +
       (r.subNames.length ? '<div class="note">Замена: ' + esc(r.subNames.join('; ')) + '. КБЖУ пересчитано.</div>' : '') +
       (r.approx ? '<div class="note">В боте у этого рецепта нет граммовок, они рассчитаны по КБЖУ примерно.</div>' : '') +
@@ -885,6 +900,36 @@ function renderRec(){
     '<td>' + esc(r.m) + '<br><span class="hint">' + r.t + ' мин</span></td><td class="num">' + r.w + ' г</td><td class="num">' + r.k + '</td><td class="num">' + r1(r.p) + ' / ' + r1(r.f) + ' / ' + r1(r.u) + '</td></tr>').join('');
 }
 
+function openCook(it){
+  const r = byId(it.id), n = plan.persons, pot = plan.days * n;
+  const c0 = it.cook || {};
+  const nutTxt = (q, w) => { const k = r.k * q, pp = r.p * q, f = r.f * q, u = r.u * q;
+    return Math.round(k) + ' ккал · Б ' + r1(pp) + ' · Ж ' + r1(f) + ' · У ' + r1(u) + (w ? '<br><span class="hint">на 100 г готового: ' + Math.round(k / w * 100) + ' ккал · Б ' + r1(pp / w * 100) + ' · Ж ' + r1(f / w * 100) + ' · У ' + r1(u / w * 100) + '</span>' : ''); };
+  $('dlg-body').innerHTML = '<div class="dlg-head"><div><h2>Готовое блюдо</h2><div class="hint">' + esc(r.n) + '</div></div><button type="button" class="btn small ghost" data-close>Закрыть</button></div>' +
+    '<p class="hint" style="margin:0">При готовке уходит вода — блюдо весит меньше, а КБЖУ остаётся. Впиши вес — посчитаю КБЖУ готовой порции. Порция отмеченного блюда больше не подгоняется, остальное меню подстроится.</p>' +
+    '<label class="field"><span class="label">Всё блюдо после готовки, г <span class="hint">(вся форма/кастрюля — ' + pot + ' ' + plural(pot,'порция','порции','порций') + ')</span></span><input class="inp" type="number" inputmode="decimal" min="0" id="ck-total" value="' + (c0.total || '') + '" placeholder="необязательно"></label>' +
+    Array.from({ length: n }, (_, i) => '<div class="card" style="background:var(--bg)"><label class="field" style="margin:0"><span class="label">Порция ' + (n > 1 ? esc(pname(i)) : '') + ' на тарелке, г</span>' +
+      '<input class="inp" type="number" inputmode="decimal" min="0" data-ck="' + i + '" value="' + ((c0.por || [])[i] || '') + '" placeholder="необязательно"></label>' +
+      '<p class="hint" style="margin:6px 0 0">по плану ' + Math.round(r.w * planS(it, i)) + ' г (вес по рецепту)</p><p style="margin:4px 0 0" id="ck-out-' + i + '"></p></div>').join('') +
+    '<div class="row"><button type="button" class="btn small" id="ck-save">Сохранить</button>' + (it.fix ? '<button type="button" class="btn small ghost" id="ck-reset">Снять отметку «готово»</button>' : '') + '</div>';
+  const read = () => ({ total: +$('ck-total').value || 0, por: Array.from({ length: n }, (_, i) => +document.querySelector('[data-ck="' + i + '"]').value || 0) });
+  const show = () => { const res = cookCalc(it, read()); res.forEach((x, i) => { $('ck-out-' + i).innerHTML = (x.w ? '<b>готовое ' + Math.round(x.w) + ' г</b> · ' : '') + nutTxt(x.q, x.w); }); };
+  $('dlg-body').oninput = show; show();
+  $('ck-save').onclick = () => {
+    const c = read();
+    if (!it.cook) it.cook = { base: Array.from({ length: n }, (_, i) => sc(it, i)) };
+    it.cook.total = c.total || null; it.cook.por = c.por.map(x => x || null);
+    const res = cookCalc(it, it.cook);
+    it.sp = res.map(x => x.q); it.s = it.sp[0]; it.fix = true;
+    TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); $('dlg').close(); renderAll(); toast('Сохранено — КБЖУ дня пересчитано');
+  };
+  if ($('ck-reset')) $('ck-reset').onclick = () => {
+    if (it.cook && it.cook.base){ it.sp = it.cook.base.slice(); it.s = it.sp[0]; }
+    delete it.cook; it.fix = false;
+    TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); $('dlg').close(); renderAll(); toast('Порцию снова можно подгонять');
+  };
+  const d = $('dlg'); if (d.showModal) d.showModal(); else d.setAttribute('open', '');
+}
 function openRecipe(id, s){
   const r = byId(id);
   const n = { k: r.k * s, p: r.p * s, f: r.f * s, u: r.u * s };
@@ -948,13 +993,14 @@ function delExtra(slot, xi){
 }
 
 // ---------- текст для копирования ----------
+const wTxt = (it, i, frac) => { const cw = cookedW(it, i); return cw != null ? 'готовое ' + Math.round(cw * frac) + ' г' : Math.round(byId(it.id).w * sc(it, i) * frac) + ' г'; };
 function menuText(){
   const day = plan.blocks[0], n = dayNut(day);
   return 'Меню дня · ' + factorText() + (plan.days > 1 ? ' (' + dayDate(0) + ' – ' + dayDate(plan.days - 1) + ')' : '') + '\n\n' + displayMeals(day).map(c => {
     const mn = cardNut(c);
     return c.title + '\n' + c.parts.map(p => {
       const r = byId(p.it.id);
-      return '  • ' + (c.half ? '½ ' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] + ': ' : '')) + lc(r.n) + ' (' + (nPers() > 1 ? Array.from({ length: nPers() }, (_, i) => pname(i) + ' ' + Math.round(r.w * sc(p.it, i) * p.frac) + ' г').join(', ') : Math.round(r.w * p.it.s * p.frac) + ' г') + ')';
+      return '  • ' + (c.half ? '½ ' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] + ': ' : '')) + lc(r.n) + ' (' + (nPers() > 1 ? Array.from({ length: nPers() }, (_, i) => pname(i) + ' ' + wTxt(p.it, i, p.frac)).join(', ') : wTxt(p.it, 0, p.frac)) + ')';
     }).concat(extrasOf(c.m).map(x => '  • + ' + x.e.n + ' (' + x.g + ' ' + x.e.u + ')' + (whoOf(x) !== 'all' ? ' — для: ' + pname(whoOf(x)) : ''))).join('\n') + '\nкбжу: ' + Math.round(mn.k) + ' / ' + r1(mn.p) + ' / ' + r1(mn.f) + ' / ' + r1(mn.u);
   }).join('\n\n') + '\n\n' + Array.from({ length: nPers() }, (_, i) => { const t = dayNut(day, i);
     return 'итог дня' + (nPers() > 1 ? ' — ' + pname(i) : '') + ': 🔥' + Math.round(t.k) + ' ккал: Б ' + r1(t.p) + ' / Ж ' + r1(t.f) + ' / У ' + r1(t.u); }).join('\n');
@@ -1052,8 +1098,7 @@ $('rec-body').addEventListener('change', e => {
 });
 document.addEventListener('click', e => {
   const o = e.target.closest('[data-open]'); if (o){ openRecipe(+o.dataset.open, +o.dataset.s); return; }
-  const fx = e.target.closest('[data-fix]'); if (fx){ const [a, b] = fx.dataset.fix.split(',').map(Number); const it = plan.blocks[0].meals[a].items[b];
-    it.fix = !it.fix; TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); renderAll(); toast(it.fix ? 'Порция этого блюда больше не меняется' : 'Порцию снова можно подгонять'); return; }
+  const fx = e.target.closest('[data-fix]'); if (fx){ const [a, b] = fx.dataset.fix.split(',').map(Number); openCook(plan.blocks[0].meals[a].items[b]); return; }
   const sw = e.target.closest('[data-swap]'); if (sw){ const [a, b, c] = sw.dataset.swap.split(',').map(Number); swapItem(a, b, c); return; }
   const rb = e.target.closest('[data-rebuild]'); if (rb){ rebuildBlock(rb); return; }
   if (e.target.closest('[data-gen]')){ generate(); toast('Меню готово'); return; }
@@ -1074,7 +1119,7 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '10 · 20.10';
+const APP_VERSION = '11 · 22.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
 const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
