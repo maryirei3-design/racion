@@ -694,8 +694,9 @@ function batchNut(it, c){
 function cookCalc(it, c){
   const r = byId(it.id), b = batchNut(it, c), tot = c.total > 0 ? c.total : null;
   return Array.from({ length: plan.persons }, (_, p) => {
-    const por = c.por && c.por[p] > 0 ? c.por[p] : null;
-    const share = tot && por ? por / tot : planS(it, p) / (sumPlan(it) * plan.days);
+    const por = c.por && c.por[p] > 0 ? c.por[p] : null, ref = c.ref && c.ref[p] > 0 ? c.ref[p] : null;
+    // без веса всего блюда: первый вписанный вес порции = полная порция по плану, дальше КБЖУ меняется пропорционально
+    const share = tot && por ? por / tot : planS(it, p) / (sumPlan(it) * plan.days) * (por && ref ? por / ref : 1);
     return { k: b[0] * share, p: b[1] * share, f: b[2] * share, u: b[3] * share, w: por || (tot ? tot * share : null), wr: r.w * planS(it, p) };
   });
 }
@@ -980,7 +981,7 @@ function openCook(it){
     '<label class="field"><span class="label">Всё блюдо после готовки, г</span><input class="inp" type="number" inputmode="decimal" min="0" id="ck-total" value="' + (c0.total || '') + '" placeholder="взвесь без формы/кастрюли"></label>' +
     Array.from({ length: n }, (_, i) => '<div class="card" style="background:var(--bg)"><label class="field" style="margin:0"><span class="label">Порция ' + (n > 1 ? esc(pname(i)) : '') + ' на тарелке, г</span>' +
       '<input class="inp" type="number" inputmode="decimal" min="0" data-ck="' + i + '" value="' + ((c0.por || [])[i] || '') + '" placeholder="необязательно"></label>' +
-      '<p style="margin:6px 0 0" id="ck-out-' + i + '"></p></div>').join('') +
+      '<p class="hint" style="margin:6px 0 0" id="ck-ref-' + i + '"></p><p style="margin:4px 0 0" id="ck-out-' + i + '"></p></div>').join('') +
     '<div class="row"><button type="button" class="btn small" id="ck-save">Сохранить</button>' + (it.fix ? '<button type="button" class="btn small ghost" id="ck-reset">Снять отметку «готово»</button>' : '') + '</div>';
   const read = () => {
     const ing = {}; let changed = false;
@@ -992,16 +993,20 @@ function openCook(it){
       const known = ingV(nm); row.querySelector('[data-ahint]').textContent = known && !vv.some(Boolean) ? 'из списка: ' + known[0] + ' ккал · Б ' + known[1] + ' · Ж ' + known[2] + ' · У ' + known[3] + ' на 100 г' : 'КБЖУ на 100 г — если продукта нет в списке';
       return { n: nm, g, v: vv.some(Boolean) ? vv.map(x => +x || 0) : null };
     }).filter(a => a.n && a.g);
-    return { ing: changed ? ing : null, add, total: +$('ck-total').value || 0, por: Array.from({ length: n }, (_, i) => +document.querySelector('[data-ck="' + i + '"]').value || 0) };
+    const por = Array.from({ length: n }, (_, i) => +document.querySelector('[data-ck="' + i + '"]').value || 0);
+    return { ing: changed ? ing : null, add, total: +$('ck-total').value || 0, por, ref: por.map((x, i) => x ? (refs[i] || x) : null) };
   };
-  const show = () => { const res = cookCalc(it, read()); res.forEach((x, i) => { $('ck-out-' + i).innerHTML = (x.w ? '<b>готовое ' + Math.round(x.w) + ' г</b> · ' : '<b>' + Math.round(x.wr) + ' г по плану</b> · ') + nutTxt(x, x.w); }); };
+  const refs = (c0.ref || []).slice();
+  const show = () => { const c = read(), res = cookCalc(it, c); res.forEach((x, i) => {
+    $('ck-ref-' + i).innerHTML = c.total ? '' : c.ref[i] ? 'полная порция по плану — ' + c.ref[i] + ' г; впиши меньше или больше — КБЖУ изменится' + (c.por[i] !== c.ref[i] ? ' · <button type="button" class="linkish" data-ckref="' + i + '">это и есть полная порция</button>' : '') : ''; $('ck-out-' + i).innerHTML = (x.w ? '<b>готовое ' + Math.round(x.w) + ' г</b> · ' : '<b>' + Math.round(x.wr) + ' г по плану</b> · ') + nutTxt(x, x.w); }); };
   $('dlg-body').oninput = show;
+  $('dlg-body').onclick = e => { const b = e.target.closest('[data-ckref]'); if (b){ const i = +b.dataset.ckref; refs[i] = +document.querySelector('[data-ck="' + i + '"]').value || null; show(); } };
   $('ck-more').onclick = () => { $('ck-adds').insertAdjacentHTML('beforeend', addRow({})); };
   show();
   $('ck-save').onclick = () => {
     const c = read();
     const base = it.cook && it.cook.base ? it.cook.base : Array.from({ length: n }, (_, i) => sc(it, i));
-    it.cook = { base, total: c.total || null, por: c.por.map(x => x || null), ing: c.ing, add: c.add };
+    it.cook = { base, total: c.total || null, por: c.por.map(x => x || null), ref: c.ref, ing: c.ing, add: c.add };
     it.sp = base.slice(); it.s = it.sp[0]; it.fix = true;
     TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); $('dlg').close(); renderAll(); toast('Сохранено — КБЖУ дня пересчитано');
   };
@@ -1205,7 +1210,7 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '13 · 22.10';
+const APP_VERSION = '14 · 22.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
 const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
