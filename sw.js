@@ -1,5 +1,5 @@
 // Офлайн-режим: страница всегда берётся из сети (в обход временной копии браузера), а без интернета — из кэша.
-const CACHE = 'racion-v16';
+const CACHE = 'racion-v17';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' }))))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
@@ -8,6 +8,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== self.location.origin) return; // GitHub (база) и прочее чужое — всегда из сети, не кэшируем
   if (req.mode === 'navigate'){
     e.respondWith(fetch(req, { cache: 'no-store' }).then(r => { const c = r.clone(); caches.open(CACHE).then(ca => ca.put('./index.html', c)); return r; })
       .catch(() => caches.match('./index.html')));

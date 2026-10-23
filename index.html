@@ -694,6 +694,7 @@ function batchNut(it, c){
 function cookCalc(it, c){
   const r = byId(it.id), b = batchNut(it, c), tot = c.total > 0 ? c.total : null;
   return Array.from({ length: plan.persons }, (_, p) => {
+    if (c.skip && c.skip[p]) return { k:0, p:0, f:0, u:0, w:0, wr:0, skip:true }; // не ел(а)
     const por = c.por && c.por[p] > 0 ? c.por[p] : null, ref = c.ref && c.ref[p] > 0 ? c.ref[p] : null;
     // без веса всего блюда: первый вписанный вес порции = полная порция по плану, дальше КБЖУ меняется пропорционально
     const share = tot && por ? por / tot : planS(it, p) / (sumPlan(it) * plan.days) * (por && ref ? por / ref : 1);
@@ -815,7 +816,7 @@ function renderMenu(){
     const items = c.parts.map(p => {
       const r = byId(p.it.id), q = sc(p.it, viewer()), cw = cookedW(p.it, viewer()), w = (cw != null ? cw : r.w * q) * p.frac;
       const roleTxt = c.half ? 'половина порции' : (c.parts.length > 1 && ROLE_LABEL[p.it.role] ? ROLE_LABEL[p.it.role] : '');
-      return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + q + '">' + esc(r.n) + '</button> <span class="w">' + (cw != null ? 'готовое ' : '') + Math.round(w) + ' г</span>' +
+      return '<div class="item"><span class="txt">' + (roleTxt ? '<span class="role">' + roleTxt + '</span>' : '') + '<button type="button" class="linkish" data-open="' + p.it.id + '" data-s="' + q + '">' + esc(r.n) + '</button> <span class="w">' + (p.it.cook && cookCalc(p.it, p.it.cook)[viewer()].skip ? 'не ел' + (viewer() === 0 ? '(а)' : '') : (cw != null ? 'готовое ' : '') + Math.round(w) + ' г') + '</span>' +
         ' <button type="button" class="who" data-fix="' + p.mi + ',' + p.ii + '" title="Готовое блюдо: отметить, вписать вес после готовки">' + (p.it.fix ? '✓ готово' + (p.it.cook && (p.it.cook.total || (p.it.cook.por || []).some(x => x)) ? ' · вес' : '') : 'приготовила?') + '</button></span>' +
         (p.it.fix ? '' : '<button type="button" class="swap" title="Заменить блюдо" aria-label="Заменить: ' + esc(r.n) + '" data-swap="0,' + p.mi + ',' + p.ii + '">' + ICON_SWAP + '</button>') + '</div>';
     }).join('');
@@ -981,6 +982,7 @@ function openCook(it){
     '<label class="field"><span class="label">Всё блюдо после готовки, г</span><input class="inp" type="number" inputmode="decimal" min="0" id="ck-total" value="' + (c0.total || '') + '" placeholder="взвесь без формы/кастрюли"></label>' +
     Array.from({ length: n }, (_, i) => '<div class="card" style="background:var(--bg)"><label class="field" style="margin:0"><span class="label">Порция ' + (n > 1 ? esc(pname(i)) : '') + ' на тарелке, г</span>' +
       '<input class="inp" type="number" inputmode="decimal" min="0" data-ck="' + i + '" value="' + ((c0.por || [])[i] || '') + '" placeholder="необязательно"></label>' +
+      '<label class="row" style="gap:6px;margin-top:6px"><input type="checkbox" data-skip="' + i + '"' + ((c0.skip || [])[i] ? ' checked' : '') + '> не ел' + (i === 0 ? '(а)' : '') + ' это блюдо</label>' +
       '<p class="hint" style="margin:6px 0 0" id="ck-ref-' + i + '"></p><p style="margin:4px 0 0" id="ck-out-' + i + '"></p></div>').join('') +
     '<div class="row"><button type="button" class="btn small" id="ck-save">Сохранить</button>' + (it.fix ? '<button type="button" class="btn small ghost" id="ck-reset">Снять отметку «готово»</button>' : '') + '</div>';
   const read = () => {
@@ -994,10 +996,12 @@ function openCook(it){
       return { n: nm, g, v: vv.some(Boolean) ? vv.map(x => +x || 0) : null };
     }).filter(a => a.n && a.g);
     const por = Array.from({ length: n }, (_, i) => +document.querySelector('[data-ck="' + i + '"]').value || 0);
-    return { ing: changed ? ing : null, add, total: +$('ck-total').value || 0, por, ref: por.map((x, i) => x ? (refs[i] || x) : null) };
+    const skip = Array.from({ length: n }, (_, i) => document.querySelector('[data-skip="' + i + '"]').checked);
+    return { ing: changed ? ing : null, add, total: +$('ck-total').value || 0, por, ref: por.map((x, i) => x ? (refs[i] || x) : null), skip };
   };
   const refs = (c0.ref || c0.por || []).slice(); // полная порция = первый сохранённый вес
   const show = () => { const c = read(), res = cookCalc(it, c); res.forEach((x, i) => {
+    if (x.skip){ $('ck-ref-' + i).innerHTML = ''; $('ck-out-' + i).innerHTML = '<b>не ел' + (i === 0 ? '(а)' : '') + '</b> · 0 ккал'; return; }
     $('ck-ref-' + i).innerHTML = c.total ? '' : c.ref[i] ? 'полная порция по плану — ' + c.ref[i] + ' г; впиши меньше или больше — КБЖУ изменится' + (c.por[i] !== c.ref[i] ? ' · <button type="button" class="linkish" data-ckref="' + i + '">это и есть полная порция</button>' : '') : ''; $('ck-out-' + i).innerHTML = (x.w ? '<b>готовое ' + Math.round(x.w) + ' г</b> · ' : '<b>' + Math.round(x.wr) + ' г по плану</b> · ') + nutTxt(x, x.w); }); };
   $('dlg-body').oninput = show;
   $('dlg-body').onclick = e => { const b = e.target.closest('[data-ckref]'); if (b){ const i = +b.dataset.ckref; refs[i] = +document.querySelector('[data-ck="' + i + '"]').value || null; show(); } };
@@ -1006,7 +1010,7 @@ function openCook(it){
   $('ck-save').onclick = () => {
     const c = read();
     const base = it.cook && it.cook.base ? it.cook.base : Array.from({ length: n }, (_, i) => sc(it, i));
-    it.cook = { base, total: c.total || null, por: c.por.map(x => x || null), ref: c.ref, ing: c.ing, add: c.add };
+    it.cook = { base, total: c.total || null, por: c.por.map(x => x || null), ref: c.ref, skip: c.skip.some(Boolean) ? c.skip : null, ing: c.ing, add: c.add };
     it.sp = base.slice(); it.s = it.sp[0]; it.fix = true;
     TG = plan.target; solveAll(plan.blocks[0], plan.persons); store.set('rp_plan3', plan); $('dlg').close(); renderAll(); toast('Сохранено — КБЖУ дня пересчитано');
   };
@@ -1082,7 +1086,7 @@ function delExtra(slot, xi){
 }
 
 // ---------- текст для копирования ----------
-const wTxt = (it, i, frac) => { const cw = cookedW(it, i); return cw != null ? 'готовое ' + Math.round(cw * frac) + ' г' : Math.round(byId(it.id).w * sc(it, i) * frac) + ' г'; };
+const wTxt = (it, i, frac) => { if (it.cook && cookCalc(it, it.cook)[i].skip) return 'не ел' + (i === 0 ? '(а)' : ''); const cw = cookedW(it, i); return cw != null ? 'готовое ' + Math.round(cw * frac) + ' г' : Math.round(byId(it.id).w * sc(it, i) * frac) + ' г'; };
 function menuText(){
   const day = plan.blocks[0], n = dayNut(day);
   return 'Меню дня · ' + factorText() + (plan.days > 1 ? ' (' + dayDate(0) + ' – ' + dayDate(plan.days - 1) + ')' : '') + '\n\n' + displayMeals(day).map(c => {
@@ -1210,7 +1214,7 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '16 · 23.10';
+const APP_VERSION = '17 · 23.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
 const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
