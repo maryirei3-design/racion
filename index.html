@@ -1210,7 +1210,7 @@ $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) $('dlg').cl
 // Любое изменение (меню, настройки, отметки) через 1,5 с уходит в базу целиком.
 // При открытии: если в базе версия новее (менял Claude или другое устройство) — забираем её.
 // Без интернета изменение ждёт (sync.pending) и уходит, когда сеть появится.
-const APP_VERSION = '15 · 22.10';
+const APP_VERSION = '16 · 23.10';
 const REPO = 'maryirei3-design/racion-data', FILE = 'data.json';
 const SYNC_KEYS = ['rp_settings','rp_excluded','rp_checked','rp_plan3','rp_products'];
 const sync = store.get('rp_sync', null) || {};
@@ -1227,7 +1227,7 @@ async function ghFile(method, body){
     headers:{ Authorization:'Bearer ' + sync.token, Accept:'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28', ...(body ? { 'Content-Type':'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined });
   if (method === 'GET' && r.status === 404) return { sha:null, data:null };
-  if (!r.ok){ const e = new Error('http ' + r.status); e.status = r.status; throw e; }
+  if (!r.ok){ let m = ''; try { m = (await r.json()).message || ''; } catch(_){} const e = new Error('GitHub ' + r.status + (m ? ': ' + m : '')); e.status = r.status; throw e; }
   const j = await r.json();
   return method === 'GET' ? { sha:j.sha, data:JSON.parse(b64d(j.content)) } : { sha:j.content.sha };
 }
@@ -1246,12 +1246,19 @@ async function pushNow(force){
       if (rp && plan && rp.created !== plan.created){ syncBusy = false; chooseMenu(remote, rp); return; }
       if (prodStamp(rs) && prodStamp(rs) !== (PROD ? PROD.updated : '')){ localStorage.setItem('rp_products', JSON.stringify(rs.rp_products)); sync.reloadAfter = true; }
     }
-    const body = { message:'Рацион · ' + new Date().toLocaleString('ru-RU'), content:b64e(JSON.stringify(buildData(), null, 1)) };
+    let txt; try { txt = JSON.stringify(buildData(), null, 1); } catch(e){ e.message = 'ошибка в приложении: ' + e.message; e.app = true; throw e; }
+    const body = { message:'Рацион · ' + new Date().toLocaleString('ru-RU'), content:b64e(txt) };
     if (remote.sha) body.sha = remote.sha;
-    const res = await ghFile('PUT', body);
-    Object.assign(sync, { sha:res.sha, pending:false, last:new Date().toISOString(), error:'' }); saveSync();
+    let res;
+    try { res = await ghFile('PUT', body); }
+    catch(e){ // базу только что поменяли (или GitHub отдал старую версию) — берём свежую и пробуем ещё раз
+      if (e.status !== 409 && e.status !== 422) throw e;
+      await new Promise(ok => setTimeout(ok, 1500));
+      const again = await ghFile('GET'); body.sha = again.sha; res = await ghFile('PUT', body);
+    }
+    Object.assign(sync, { sha:res.sha, pending:false, last:new Date().toISOString(), error:'', errMsg:'' }); saveSync();
     if (sync.reloadAfter){ delete sync.reloadAfter; saveSync(); location.reload(); }
-  } catch(e){ sync.error = errKind(e); saveSync(); }
+  } catch(e){ sync.error = e.app ? 'net' : errKind(e); sync.errMsg = String(e && e.message || e).slice(0, 160); saveSync(); }
   finally { syncBusy = false; renderSync(); renderBackup(); }
 }
 async function pullNow(){
@@ -1264,7 +1271,7 @@ async function pullNow(){
     else if (remote.data && remote.data.store && (remote.sha !== sync.sha || (prodStamp(remote.data.store) && prodStamp(remote.data.store) !== (PROD ? PROD.updated : '')))){
       adoptStore(remote.data.store); Object.assign(sync, { sha:remote.sha, last:new Date().toISOString(), error:'' }); saveSync(); reload = true;
     } else if (sync.error){ sync.error = ''; saveSync(); }
-  } catch(e){ sync.error = errKind(e); saveSync(); }
+  } catch(e){ sync.error = errKind(e); sync.errMsg = String(e && e.message || e).slice(0, 160); saveSync(); }
   finally { syncBusy = false; renderSync(); }
   if (reload){ try { sessionStorage.setItem('rp_pulled', '1'); } catch(e){} location.reload(); return; }
   if (push){ sync.pending = true; saveSync(); pushNow(); }
@@ -1307,6 +1314,7 @@ function chooseMenu(remote, rp){
 }
 function syncStatus(){
   if (sync.error === 'key') return '<span class="st-bad">Ключ не подходит или истёк — подключи заново.</span>';
+  if (sync.pending && sync.error && sync.errMsg) return '<span class="st-bad">Не отправилось: ' + esc(sync.errMsg) + '</span>';
   if (sync.pending) return navigator.onLine ? 'Сохраняю в базу…' : 'Нет интернета — сохранится, когда появится сеть.';
   if (sync.error === 'net') return 'Не удалось связаться с GitHub, повторю при следующем открытии.';
   return sync.last ? '✓ Всё сохранено в базу · ' + new Date(sync.last).toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : 'Подключено';
@@ -1338,7 +1346,7 @@ document.addEventListener('click', async e => {
     if (!/^(github_pat_|ghp_)/.test(t)){ toast('Ключ начинается с github_pat_'); return; }
     b.disabled = true; await connectSync(t); return;
   }
-  if (b.hasAttribute('data-sync-now')){ sync.pending = true; saveSync(); await pushNow(); toast(sync.error ? 'Не отправилось' : 'Сохранено в базу'); return; }
+  if (b.hasAttribute('data-sync-now')){ sync.pending = true; saveSync(); await pushNow(); toast(sync.error ? 'Не отправилось: ' + (sync.errMsg || '') : 'Сохранено в базу'); return; }
   if (b.hasAttribute('data-sync-off')){ for (const k of Object.keys(sync)) delete sync[k]; saveSync(); renderSync(); renderBackup(); toast('База отключена, данные остались в телефоне'); }
 });
 window.addEventListener('online', () => { if (sync.pending) pushNow(); });
